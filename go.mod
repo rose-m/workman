@@ -1,8 +1,8 @@
 module github.com/michael-rose/workman
 
-go 1.24.0
+go 1.25
 
-toolchain go1.24.12
+toolchain go1.25.5
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
