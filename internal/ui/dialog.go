@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,6 +18,7 @@ const (
 	DialogAddWorktree
 	DialogConfirmDelete
 	DialogConfirmDeleteRepo
+	DialogEditNotes
 )
 
 type AddRepoDialog struct {
@@ -176,11 +178,14 @@ func (d *AddRepoDialog) Reset() {
 
 // AddWorktreeDialog handles the worktree creation dialog
 type AddWorktreeDialog struct {
-	focusIndex int
-	input      textinput.Model
+	focusIndex       int
+	input            textinput.Model
+	branches         []string
+	suggestions      []string
+	selectedSuggestion int
 }
 
-func NewAddWorktreeDialog() AddWorktreeDialog {
+func NewAddWorktreeDialog(branches []string) AddWorktreeDialog {
 	input := textinput.New()
 	input.Placeholder = "feature/my-feature or bugfix/issue-123"
 	input.Focus()
@@ -188,14 +193,84 @@ func NewAddWorktreeDialog() AddWorktreeDialog {
 	input.Width = 50
 
 	return AddWorktreeDialog{
-		focusIndex: 0,
-		input:      input,
+		focusIndex:       0,
+		input:            input,
+		branches:         branches,
+		suggestions:      []string{},
+		selectedSuggestion: 0,
 	}
 }
 
+// fuzzyMatch returns true if pattern matches text (case-insensitive, fuzzy)
+func fuzzyMatch(pattern, text string) bool {
+	pattern = strings.ToLower(pattern)
+	text = strings.ToLower(text)
+
+	patternIdx := 0
+	for _, char := range text {
+		if patternIdx < len(pattern) && rune(pattern[patternIdx]) == char {
+			patternIdx++
+		}
+	}
+	return patternIdx == len(pattern)
+}
+
+// updateSuggestions filters branches based on the current input
+func (d *AddWorktreeDialog) updateSuggestions() {
+	input := strings.TrimSpace(d.input.Value())
+	if input == "" {
+		d.suggestions = []string{}
+		d.selectedSuggestion = 0
+		return
+	}
+
+	var matches []string
+	for _, branch := range d.branches {
+		if fuzzyMatch(input, branch) {
+			matches = append(matches, branch)
+			if len(matches) >= 5 { // Limit to 5 suggestions
+				break
+			}
+		}
+	}
+
+	d.suggestions = matches
+	d.selectedSuggestion = 0
+}
+
 func (d *AddWorktreeDialog) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "ctrl+p":
+			if len(d.suggestions) > 0 {
+				d.selectedSuggestion--
+				if d.selectedSuggestion < 0 {
+					d.selectedSuggestion = len(d.suggestions) - 1
+				}
+				return nil
+			}
+		case "down", "ctrl+n":
+			if len(d.suggestions) > 0 {
+				d.selectedSuggestion++
+				if d.selectedSuggestion >= len(d.suggestions) {
+					d.selectedSuggestion = 0
+				}
+				return nil
+			}
+		case "enter", "tab":
+			// If there are suggestions and one is selected, use it
+			if len(d.suggestions) > 0 {
+				d.input.SetValue(d.suggestions[d.selectedSuggestion])
+				d.suggestions = []string{}
+				return nil
+			}
+		}
+	}
+
 	var cmd tea.Cmd
 	d.input, cmd = d.input.Update(msg)
+	d.updateSuggestions()
 	return cmd
 }
 
@@ -209,11 +284,35 @@ func (d *AddWorktreeDialog) View() string {
 	b.WriteString(itemStyle.Render("Branch name:"))
 	b.WriteString("\n")
 	b.WriteString(d.input.View())
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
-	// Show hint
-	hint := infoStyle.Render("If branch doesn't exist, it will be created automatically")
-	b.WriteString(hint)
+	// Show suggestions
+	if len(d.suggestions) > 0 {
+		b.WriteString("\n")
+		b.WriteString(infoStyle.Render("Suggestions:"))
+		b.WriteString("\n")
+		for i, suggestion := range d.suggestions {
+			if i == d.selectedSuggestion {
+				// Highlight selected suggestion
+				suggestionStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.AdaptiveColor{Light: "#1F2937", Dark: "#F9FAFB"}).
+					Background(primaryColor).
+					Bold(true)
+				b.WriteString(suggestionStyle.Render("  > " + suggestion))
+			} else {
+				b.WriteString(itemStyle.Render("    " + suggestion))
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("↑↓: navigate  •  Tab/Enter: select"))
+	} else {
+		b.WriteString("\n")
+		// Show hint
+		hint := infoStyle.Render("If branch doesn't exist, it will be created automatically")
+		b.WriteString(hint)
+	}
+
 	b.WriteString("\n\n")
 
 	b.WriteString(helpStyle.Render("Ctrl+S: create  •  Esc: cancel"))
@@ -332,6 +431,62 @@ func (d *ConfirmDeleteRepositoryDialog) View() string {
 		Width(60)
 
 	return dialogStyle.Render(b.String())
+}
+
+// EditNotesDialog handles editing notes for a worktree
+type EditNotesDialog struct {
+	worktreeName string
+	worktreePath string
+	textarea     textarea.Model
+}
+
+func NewEditNotesDialog(worktreeName, worktreePath, currentNotes string) EditNotesDialog {
+	ta := textarea.New()
+	ta.SetWidth(56)
+	ta.SetHeight(8)
+	ta.Focus()
+	ta.SetValue(currentNotes)
+	ta.CharLimit = 2000
+
+	return EditNotesDialog{
+		worktreeName: worktreeName,
+		worktreePath: worktreePath,
+		textarea:     ta,
+	}
+}
+
+func (d *EditNotesDialog) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	d.textarea, cmd = d.textarea.Update(msg)
+	return cmd
+}
+
+func (d *EditNotesDialog) View() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render(fmt.Sprintf("Notes - %s", d.worktreeName)))
+	b.WriteString("\n\n")
+
+	b.WriteString(d.textarea.View())
+	b.WriteString("\n\n")
+
+	b.WriteString(helpStyle.Render("Ctrl+S: save  •  Esc: cancel"))
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor).
+		Padding(1, 2).
+		Width(60)
+
+	return dialogStyle.Render(b.String())
+}
+
+func (d *EditNotesDialog) GetNotes() string {
+	return strings.TrimSpace(d.textarea.Value())
+}
+
+func (d *EditNotesDialog) GetWorktreePath() string {
+	return d.worktreePath
 }
 
 type errorMsg struct {

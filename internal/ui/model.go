@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/michael-rose/workman/internal/config"
@@ -23,6 +24,9 @@ type Model struct {
 	addWorktreeDialog       AddWorktreeDialog
 	confirmDeleteDialog     ConfirmDeleteDialog
 	confirmDeleteRepoDialog ConfirmDeleteRepositoryDialog
+	editingNotes            bool
+	notesTextarea           textarea.Model
+	editingWorktreePath     string
 	errorMsg                string
 	successMsg              string
 }
@@ -59,6 +63,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle inline notes editing mode
+		if m.editingNotes {
+			return m.handleNotesEditingKeys(msg)
+		}
+
 		// Handle dialog mode
 		if m.dialogType != DialogNone {
 			return m.handleDialogKeys(msg)
@@ -107,6 +116,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "n":
+			if m.state.ActivePane == state.WorktreesPane {
+				if len(m.state.Worktrees) > 0 && m.state.GetSelectedRepo() != nil {
+					selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
+					currentNotes := m.state.Config.GetWorktreeNotes(selectedWT.Path)
+
+					// Create and configure textarea for inline editing
+					ta := textarea.New()
+					ta.SetWidth(60)
+					ta.SetHeight(6)
+					ta.Focus()
+					ta.SetValue(currentNotes)
+					ta.CharLimit = 2000
+
+					m.editingNotes = true
+					m.notesTextarea = ta
+					m.editingWorktreePath = selectedWT.Path
+					m.errorMsg = ""
+					m.successMsg = ""
+				}
+			}
+			return m, nil
+
 		case "+":
 			switch m.state.ActivePane {
 			case state.ReposPane:
@@ -117,9 +149,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.successMsg = ""
 			case state.WorktreesPane:
 				// Show add worktree dialog (only if a repo is selected)
-				if m.state.GetSelectedRepo() != nil {
+				if repo := m.state.GetSelectedRepo(); repo != nil {
+					// Fetch branches for autocomplete
+					branches, err := git.ListBranches(repo.Path)
+					if err != nil {
+						branches = []string{} // If fetch fails, continue with empty list
+					}
+
 					m.dialogType = DialogAddWorktree
-					m.addWorktreeDialog = NewAddWorktreeDialog()
+					m.addWorktreeDialog = NewAddWorktreeDialog(branches)
 					m.errorMsg = ""
 					m.successMsg = ""
 				}
@@ -160,17 +198,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleNotesEditingKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+s":
+		// Save notes and exit editing mode
+		notes := strings.TrimSpace(m.notesTextarea.Value())
+
+		// Update notes in config (or remove if empty)
+		m.state.Config.SetWorktreeNotes(m.editingWorktreePath, notes)
+
+		// Save config
+		if err := config.Save(m.state.Config); err != nil {
+			m.errorMsg = fmt.Sprintf("Failed to save notes: %v", err)
+			m.successMsg = ""
+		} else {
+			m.successMsg = "Notes saved"
+			m.errorMsg = ""
+		}
+
+		// Exit editing mode
+		m.editingNotes = false
+		m.editingWorktreePath = ""
+		m.notesTextarea.Blur()
+
+		return m, nil
+
+	default:
+		// Pass all other keys to the textarea
+		var cmd tea.Cmd
+		m.notesTextarea, cmd = m.notesTextarea.Update(msg)
+		return m, cmd
+	}
+}
+
 func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 
-	case "esc", "n":
-		// Cancel dialog (or "n" for confirmation dialog)
+	case "esc":
+		// Cancel dialog for all dialog types
 		m.dialogType = DialogNone
 		m.errorMsg = ""
 		m.successMsg = ""
 		return m, nil
+
+	case "n":
+		// "n" only cancels confirmation dialogs (means "no")
+		// For other dialogs, it's just a regular character
+		switch m.dialogType {
+		case DialogConfirmDelete, DialogConfirmDeleteRepo:
+			m.dialogType = DialogNone
+			m.errorMsg = ""
+			m.successMsg = ""
+			return m, nil
+		}
 
 	case "y":
 		// Confirm action (only for confirmation dialogs)
@@ -191,21 +273,20 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.saveWorktree()
 		}
 		return m, nil
+	}
 
-	default:
-		// Update the dialog with the key press
-		switch m.dialogType {
-		case DialogAddRepo:
-			cmd := m.addRepoDialog.Update(msg)
-			m.errorMsg = ""
-			m.successMsg = ""
-			return m, cmd
-		case DialogAddWorktree:
-			cmd := m.addWorktreeDialog.Update(msg)
-			m.errorMsg = ""
-			m.successMsg = ""
-			return m, cmd
-		}
+	// Update the dialog with the key press (for input dialogs)
+	switch m.dialogType {
+	case DialogAddRepo:
+		cmd := m.addRepoDialog.Update(msg)
+		m.errorMsg = ""
+		m.successMsg = ""
+		return m, cmd
+	case DialogAddWorktree:
+		cmd := m.addWorktreeDialog.Update(msg)
+		m.errorMsg = ""
+		m.successMsg = ""
+		return m, cmd
 	}
 
 	return m, nil
@@ -371,6 +452,15 @@ func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {
 		return m, showError(fmt.Sprintf("Failed to delete branch: %v", err))
 	}
 
+	// Remove notes for this worktree
+	m.state.Config.DeleteWorktreeNotes(selectedWT.Path)
+
+	// Save config to persist notes deletion
+	if err := config.Save(m.state.Config); err != nil {
+		// Log error but don't fail the operation
+		// The worktree is already deleted
+	}
+
 	// Reload worktrees
 	worktrees, err := git.ListWorktrees(repo.Path)
 	if err != nil {
@@ -441,6 +531,11 @@ func (m Model) deleteRepository() (tea.Model, tea.Cmd) {
 			return m, showError(fmt.Sprintf("Failed to delete repository: %v\nRepository kept in config.", err))
 		}
 		// Directory doesn't exist - that's fine, continue with config removal
+	}
+
+	// Remove all notes for worktrees in this repository
+	for _, wt := range worktrees {
+		m.state.Config.DeleteWorktreeNotes(wt.Path)
 	}
 
 	// Remove repository from config
@@ -680,7 +775,54 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 		}
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, header, strings.Join(items, "\n"))
+	// Add notes section if a worktree is selected
+	var notesSection string
+	if len(m.state.Worktrees) > 0 && m.state.SelectedWTIndex < len(m.state.Worktrees) {
+		selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
+
+		notesHeader := lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"}).
+			Bold(true).
+			Render("\nNotes:")
+
+		// Check if we're editing this worktree's notes
+		if m.editingNotes && m.editingWorktreePath == selectedWT.Path {
+			// Show the textarea for inline editing
+			textareaView := m.notesTextarea.View()
+			helpText := lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"}).
+				Italic(true).
+				Render("ESC or Ctrl+S to save and exit")
+			notesSection = notesHeader + "\n" + textareaView + "\n" + helpText
+		} else {
+			// Show the notes in read-only mode
+			notes := m.state.Config.GetWorktreeNotes(selectedWT.Path)
+
+			if notes != "" {
+				// Truncate notes if too long
+				maxNoteLength := 200
+				displayNotes := notes
+				if len(notes) > maxNoteLength {
+					displayNotes = notes[:maxNoteLength] + "..."
+				}
+				// Replace newlines with spaces for compact display
+				displayNotes = strings.ReplaceAll(displayNotes, "\n", " ")
+				notesContent := lipgloss.NewStyle().
+					Foreground(lipgloss.AdaptiveColor{Light: "#4B5563", Dark: "#D1D5DB"}).
+					Italic(true).
+					Render("  " + displayNotes)
+				notesSection = notesHeader + "\n" + notesContent
+			} else {
+				emptyNotes := lipgloss.NewStyle().
+					Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"}).
+					Italic(true).
+					Render("  (no notes - press 'n' to add)")
+				notesSection = notesHeader + "\n" + emptyNotes
+			}
+		}
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, header, strings.Join(items, "\n"), notesSection)
 
 	return style.
 		Width(width).
@@ -690,7 +832,7 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 
 func (m Model) renderHelp() string {
 	help := []string{
-		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Yank: y   Quit: q or ctrl+c",
+		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Notes: n   Yank: y   Quit: q or ctrl+c",
 	}
 	return helpStyle.Render(strings.Join(help, " • "))
 }

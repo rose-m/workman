@@ -208,6 +208,43 @@ func DeleteRepository(repoPath string) error {
 	return nil
 }
 
+// ListBranches lists all local and remote branches for a repository
+func ListBranches(repoPath string) ([]string, error) {
+	cmd := exec.Command("git", "branch", "-a", "--format=%(refname:short)")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list branches: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var branches []string
+	seen := make(map[string]bool)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Remove "origin/" prefix for remote branches
+		branch := strings.TrimPrefix(line, "origin/")
+
+		// Skip HEAD reference
+		if strings.Contains(branch, "HEAD") {
+			continue
+		}
+
+		// Deduplicate branches
+		if !seen[branch] {
+			branches = append(branches, branch)
+			seen[branch] = true
+		}
+	}
+
+	return branches, nil
+}
+
 // CloneRepository clones a remote repository to the specified path
 func CloneRepository(url, targetPath string) error {
 	// Check if target path already exists
