@@ -64,6 +64,8 @@ See `config.example.toml` for a complete example.
 ### Config Structure
 
 ```toml
+# Root directory where worktrees will be created
+# Defaults to ~/workspace
 root_directory = "/path/to/your/workspace"
 
 [[repositories]]
@@ -73,12 +75,53 @@ path = "/path/to/existing/repo"
 url = ""
 ```
 
+**Important:** The `root_directory` is where all worktrees will be created with the naming pattern `<reponame>-<branchname>`.
+
+You can also add repositories directly through the UI by pressing `+` when in the repositories pane (left side). The type will be automatically detected:
+- URLs starting with `http://`, `https://`, `git@`, or `ssh://` are detected as **remote**
+- All other paths are detected as **local**
+
 ## Keyboard Shortcuts
 
+### Main View
 - `↑/↓` or `j/k` - Navigate items in the active pane
 - `Tab` - Switch between repositories and worktrees panes
-- `+` - Add repository or worktree (TODO)
+- `+` - Add repository (when in repos pane) or add worktree (when in worktrees pane)
+- `-` - Delete worktree (when in worktrees pane, with confirmation)
 - `q` or `Ctrl+C` - Quit
+
+### Add Repository Dialog
+- `Enter` / `Tab` / `↓` - Move to next field
+- `Shift+Tab` / `↑` - Move to previous field
+- `Ctrl+S` - Save repository
+- `Esc` - Cancel
+
+**Note:** Repository type (local vs remote) is automatically detected based on the path/URL you enter.
+
+### Add Worktree Dialog
+- Type branch name
+- `Ctrl+S` - Create worktree
+- `Esc` - Cancel
+
+**Worktree Creation:**
+- Worktrees are created in the configured `root_directory`
+- Path format: `<root_directory>/<reponame>-<branchname>`
+- Both repo and branch names are sanitized (alphanumeric + dashes only, lowercase)
+- Example: repo "My Repo" + branch "feature/new-thing" → `~/workspace/my-repo-feature-new-thing`
+
+**Branch Creation:**
+- If the branch doesn't exist:
+  - For **remote** repos: new branch is created based on `origin/main` (or `origin/master`)
+  - For **local** repos: new branch is created based on the currently checked out branch
+
+### Delete Worktree Confirmation
+- `y` - Confirm deletion
+- `n` or `Esc` - Cancel
+
+**Warning:** Deleting a worktree will:
+- Remove the worktree directory and all files
+- Delete the branch (even if unmerged!)
+- Cannot delete the main worktree (the first one in the list)
 
 ## Project Structure
 
@@ -96,20 +139,26 @@ workman/
 
 ## Current Status
 
-This is a basic scaffolding with:
+This is a working TUI with:
 - ✅ Split pane UI (repositories left, worktrees right)
 - ✅ Keyboard navigation (arrows, j/k, tab)
-- ✅ Configuration file management
+- ✅ Configuration file management (TOML)
 - ✅ Basic state management
-- ⏳ Git operations (placeholder implementations)
-- ⏳ Add/remove repositories
-- ⏳ Create/manage worktrees
+- ✅ Add repositories (interactive dialog with auto-type detection)
+- ✅ List/display worktrees for selected repository
+- ✅ Create worktrees with automatic branch creation
+- ✅ Delete worktrees with confirmation (removes branch even if unmerged)
+- ✅ Git operations (list, create, delete worktrees and branches)
+- ⏳ Delete repositories
+- ⏳ Clone remote repositories
 
 ## Next Steps
 
-1. Implement actual git operations using `go-git` or git CLI
-2. Add dialogs for adding repositories and worktrees
-3. Add repository cloning functionality
-4. Add worktree creation/deletion
-5. Display more repository and worktree details
-6. Add status indicators (clean, dirty, ahead/behind)
+1. Add repository cloning functionality for remote repos
+2. Add repository deletion from config (with confirmation)
+3. Display more repository details (current branch, status)
+4. Display more worktree details (commit hash, ahead/behind status)
+5. Add status indicators (clean, dirty, ahead/behind)
+6. Add ability to open worktree in editor/terminal
+7. Add Git stash management
+8. Add search/filter for repositories and worktrees
