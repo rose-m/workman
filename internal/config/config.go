@@ -17,6 +17,7 @@ type Repository struct {
 type Config struct {
 	RootDirectory string       `mapstructure:"root_directory"`
 	Repositories  []Repository `mapstructure:"repositories"`
+	YankTemplate  string       `mapstructure:"yank_template"`
 }
 
 func DefaultConfig() *Config {
@@ -24,6 +25,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		RootDirectory: filepath.Join(homeDir, "workspace"),
 		Repositories:  []Repository{},
+		YankTemplate:  "${worktree_path}",
 	}
 }
 
@@ -49,6 +51,7 @@ func Load() (*Config, error) {
 	defaultCfg := DefaultConfig()
 	viper.SetDefault("root_directory", defaultCfg.RootDirectory)
 	viper.SetDefault("repositories", defaultCfg.Repositories)
+	viper.SetDefault("yank_template", defaultCfg.YankTemplate)
 
 	// If config file doesn't exist, create it with defaults
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
@@ -73,5 +76,6 @@ func Load() (*Config, error) {
 func Save(cfg *Config) error {
 	viper.Set("root_directory", cfg.RootDirectory)
 	viper.Set("repositories", cfg.Repositories)
+	viper.Set("yank_template", cfg.YankTemplate)
 	return viper.WriteConfig()
 }

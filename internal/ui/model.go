@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/michael-rose/workman/internal/config"
@@ -21,6 +22,7 @@ type Model struct {
 	addWorktreeDialog   AddWorktreeDialog
 	confirmDeleteDialog ConfirmDeleteDialog
 	errorMsg            string
+	successMsg          string
 }
 
 func NewModel(appState *state.AppState) Model {
@@ -50,6 +52,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorMsg = msg.err
 		return m, nil
 
+	case successMsg:
+		m.successMsg = msg.msg
+		return m, nil
+
 	case tea.KeyMsg:
 		// Handle dialog mode
 		if m.dialogType != DialogNone {
@@ -63,6 +69,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "tab":
 			m.state.TogglePane()
+			return m, nil
+
+		case "h":
+			m.state.ActivePane = state.ReposPane
+			return m, nil
+
+		case "l":
+			m.state.ActivePane = state.WorktreesPane
 			return m, nil
 
 		case "up", "k":
@@ -83,6 +97,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "y":
+			if m.state.ActivePane == state.WorktreesPane {
+				if len(m.state.Worktrees) > 0 && m.state.GetSelectedRepo() != nil {
+					return m.yankWorktreeCommand()
+				}
+			}
+			return m, nil
+
 		case "+":
 			switch m.state.ActivePane {
 			case state.ReposPane:
@@ -90,12 +112,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dialogType = DialogAddRepo
 				m.addRepoDialog = NewAddRepoDialog()
 				m.errorMsg = ""
+				m.successMsg = ""
 			case state.WorktreesPane:
 				// Show add worktree dialog (only if a repo is selected)
 				if m.state.GetSelectedRepo() != nil {
 					m.dialogType = DialogAddWorktree
 					m.addWorktreeDialog = NewAddWorktreeDialog()
 					m.errorMsg = ""
+					m.successMsg = ""
 				}
 			}
 			return m, nil
@@ -110,6 +134,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.dialogType = DialogConfirmDelete
 						m.confirmDeleteDialog = NewConfirmDeleteDialog(selectedWT.Name, selectedWT.Branch)
 						m.errorMsg = ""
+						m.successMsg = ""
 					}
 				}
 			}
@@ -129,6 +154,7 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Cancel dialog (or "n" for confirmation dialog)
 		m.dialogType = DialogNone
 		m.errorMsg = ""
+		m.successMsg = ""
 		return m, nil
 
 	case "y":
@@ -154,10 +180,12 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case DialogAddRepo:
 			cmd := m.addRepoDialog.Update(msg)
 			m.errorMsg = ""
+			m.successMsg = ""
 			return m, cmd
 		case DialogAddWorktree:
 			cmd := m.addWorktreeDialog.Update(msg)
 			m.errorMsg = ""
+			m.successMsg = ""
 			return m, cmd
 		}
 	}
@@ -297,6 +325,40 @@ func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) yankWorktreeCommand() (tea.Model, tea.Cmd) {
+	repo := m.state.GetSelectedRepo()
+	if repo == nil {
+		return m, showError("No repository selected")
+	}
+
+	if len(m.state.Worktrees) == 0 || m.state.SelectedWTIndex >= len(m.state.Worktrees) {
+		return m, showError("No worktree selected")
+	}
+
+	selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
+
+	// Get template from config
+	template := m.state.Config.YankTemplate
+	if template == "" {
+		template = "${worktree_path}"
+	}
+
+	// Perform substitutions
+	result := template
+	result = strings.ReplaceAll(result, "${repo_name}", repo.Name)
+	result = strings.ReplaceAll(result, "${branch_name}", selectedWT.Branch)
+	result = strings.ReplaceAll(result, "${worktree_path}", selectedWT.Path)
+	result = strings.ReplaceAll(result, "${worktree_name}", selectedWT.Name)
+
+	// Copy to clipboard
+	if err := clipboard.WriteAll(result); err != nil {
+		return m, showError(fmt.Sprintf("Failed to copy: %v", err))
+	}
+
+	m.errorMsg = ""
+	return m, showSuccess("Copied to clipboard")
+}
+
 func (m Model) loadWorktrees() Model {
 	repo := m.state.GetSelectedRepo()
 	if repo == nil {
@@ -346,6 +408,29 @@ func (m Model) View() string {
 
 	mainView := lipgloss.JoinVertical(lipgloss.Left, panels, help)
 
+	// Show success/error feedback if no dialog is active
+	if m.dialogType == DialogNone {
+		if m.successMsg != "" {
+			successStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#047857", Dark: "#10B981"}).
+				Background(lipgloss.AdaptiveColor{Light: "#D1FAE5", Dark: "#064E3B"}).
+				Bold(true).
+				Padding(0, 2).
+				Width(m.width - 4)
+			feedback := successStyle.Render("✓ " + m.successMsg)
+			mainView = lipgloss.JoinVertical(lipgloss.Left, feedback, mainView)
+		} else if m.errorMsg != "" {
+			errorStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#EF4444"}).
+				Background(lipgloss.AdaptiveColor{Light: "#FEE2E2", Dark: "#7F1D1D"}).
+				Bold(true).
+				Padding(0, 2).
+				Width(m.width - 4)
+			feedback := errorStyle.Render("✗ " + m.errorMsg)
+			mainView = lipgloss.JoinVertical(lipgloss.Left, feedback, mainView)
+		}
+	}
+
 	// Show dialog if active
 	if m.dialogType != DialogNone {
 		var dialog string
@@ -361,7 +446,7 @@ func (m Model) View() string {
 		// Add error message if present
 		if m.errorMsg != "" {
 			errorStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#EF4444")).
+				Foreground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#EF4444"}).
 				Bold(true).
 				Padding(0, 2)
 			dialog = lipgloss.JoinVertical(lipgloss.Left, dialog, errorStyle.Render("Error: "+m.errorMsg))
@@ -372,7 +457,7 @@ func (m Model) View() string {
 			lipgloss.Center, lipgloss.Center,
 			dialog,
 			lipgloss.WithWhitespaceChars("░"),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("#1F2937")),
+			lipgloss.WithWhitespaceForeground(lipgloss.AdaptiveColor{Light: "#E5E7EB", Dark: "#1F2937"}),
 		)
 	}
 
@@ -456,7 +541,7 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 
 func (m Model) renderHelp() string {
 	help := []string{
-		"Navigation: ↑↓ or j/k   Switch pane: tab   Add: +   Delete: -   Quit: q or ctrl+c",
+		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Yank: y   Quit: q or ctrl+c",
 	}
 	return helpStyle.Render(strings.Join(help, " • "))
 }

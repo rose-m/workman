@@ -1,4 +1,4 @@
-.PHONY: build fmt lint clean test install-tools help
+.PHONY: build fmt lint clean test install-tools install help
 
 # Binary name
 BINARY_NAME=workman
@@ -56,6 +56,13 @@ install-tools: ## Install development tools
 
 run: build ## Build and run the application
 	@./$(BINARY_NAME)
+
+install: build ## Build and install to ~/.local/bin
+	@echo "Installing $(BINARY_NAME) to ~/.local/bin..."
+	@mkdir -p ~/.local/bin
+	@cp $(BINARY_NAME) ~/.local/bin/$(BINARY_NAME)
+	@echo "Install complete: ~/.local/bin/$(BINARY_NAME)"
+	@echo "Make sure ~/.local/bin is in your PATH"
 
 all: fmt lint build ## Format, lint, and build
 

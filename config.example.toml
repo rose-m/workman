@@ -4,6 +4,12 @@
 # Root directory where remote repositories will be cloned
 root_directory = "/Users/yourusername/workspace"
 
+# Template for yanking worktree commands with 'y' key
+# Available variables: ${repo_name}, ${branch_name}, ${worktree_path}, ${worktree_name}
+# Default: "${worktree_path}"
+# Example: yank_template = 'wt "${repo_name} - ${branch_name}"; cd "${worktree_path}"'
+yank_template = "${worktree_path}"
+
 # List of repositories
 [[repositories]]
 name = "example-local"

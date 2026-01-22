@@ -281,7 +281,7 @@ func (d *ConfirmDeleteDialog) View() string {
 
 	dialogStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#EF4444")).
+		BorderForeground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#EF4444"}).
 		Padding(1, 2).
 		Width(55)
 
@@ -299,5 +299,19 @@ func (e errorMsg) Error() string {
 func showError(msg string) tea.Cmd {
 	return func() tea.Msg {
 		return errorMsg{err: msg}
+	}
+}
+
+type successMsg struct {
+	msg string
+}
+
+func (s successMsg) Success() string {
+	return s.msg
+}
+
+func showSuccess(msg string) tea.Cmd {
+	return func() tea.Msg {
+		return successMsg{msg: msg}
 	}
 }

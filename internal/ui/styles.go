@@ -3,12 +3,26 @@ package ui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// Colors
-	primaryColor = lipgloss.Color("#7C3AED")
-	textColor    = lipgloss.Color("#E5E7EB")
-	mutedColor   = lipgloss.Color("#9CA3AF")
-	borderColor  = lipgloss.Color("#4B5563")
-	selectedBg   = lipgloss.Color("#1F2937")
+	// Adaptive colors that work on both light and dark backgrounds
+	primaryColor = lipgloss.AdaptiveColor{
+		Light: "#7C3AED", // Purple
+		Dark:  "#A78BFA", // Lighter purple for dark backgrounds
+	}
+
+	mutedColor = lipgloss.AdaptiveColor{
+		Light: "#6B7280", // Medium gray
+		Dark:  "#9CA3AF", // Lighter gray
+	}
+
+	borderColor = lipgloss.AdaptiveColor{
+		Light: "#D1D5DB", // Light gray
+		Dark:  "#4B5563", // Dark gray
+	}
+
+	selectedBg = lipgloss.AdaptiveColor{
+		Light: "#EDE9FE", // Very light purple
+		Dark:  "#1F2937", // Dark gray
+	}
 
 	// Panel styles
 	panelStyle = lipgloss.NewStyle().
@@ -27,9 +41,8 @@ var (
 			Foreground(primaryColor).
 			Padding(0, 1)
 
-	// Item styles
+	// Item styles - use terminal default foreground color
 	itemStyle = lipgloss.NewStyle().
-			Foreground(textColor).
 			Padding(0, 1)
 
 	selectedItemStyle = lipgloss.NewStyle().

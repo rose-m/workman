@@ -27,6 +27,7 @@ There will be extensive keyboard support:
 Using Make (recommended):
 ```bash
 make build      # Build the binary
+make install    # Build and install to ~/.local/bin
 make fmt        # Format code
 make lint       # Run linter
 make all        # Format, lint, and build
@@ -68,6 +69,10 @@ See `config.example.toml` for a complete example.
 # Defaults to ~/workspace
 root_directory = "/path/to/your/workspace"
 
+# Template for the 'y' (yank) command
+# Variables: ${repo_name}, ${branch_name}, ${worktree_path}, ${worktree_name}
+yank_template = 'wt "${repo_name} - ${branch_name}"; cd "${worktree_path}"'
+
 [[repositories]]
 name = "my-repo"
 type = "local"
@@ -85,9 +90,10 @@ You can also add repositories directly through the UI by pressing `+` when in th
 
 ### Main View
 - `↑/↓` or `j/k` - Navigate items in the active pane
-- `Tab` - Switch between repositories and worktrees panes
+- `Tab` or `h/l` - Switch between repositories and worktrees panes (h=left, l=right)
 - `+` - Add repository (when in repos pane) or add worktree (when in worktrees pane)
 - `-` - Delete worktree (when in worktrees pane, with confirmation)
+- `y` - Yank (copy) command to clipboard (when worktree is selected)
 - `q` or `Ctrl+C` - Quit
 
 ### Add Repository Dialog
