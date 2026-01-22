@@ -16,6 +16,7 @@ const (
 	DialogAddRepo
 	DialogAddWorktree
 	DialogConfirmDelete
+	DialogConfirmDeleteRepo
 )
 
 type AddRepoDialog struct {
@@ -284,6 +285,51 @@ func (d *ConfirmDeleteDialog) View() string {
 		BorderForeground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#EF4444"}).
 		Padding(1, 2).
 		Width(55)
+
+	return dialogStyle.Render(b.String())
+}
+
+// ConfirmDeleteRepositoryDialog handles the confirmation for deleting a repository
+type ConfirmDeleteRepositoryDialog struct {
+	repositoryName string
+}
+
+func NewConfirmDeleteRepositoryDialog(repoName string) ConfirmDeleteRepositoryDialog {
+	return ConfirmDeleteRepositoryDialog{
+		repositoryName: repoName,
+	}
+}
+
+func (d *ConfirmDeleteRepositoryDialog) View() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("⚠ Confirm Delete Repository"))
+	b.WriteString("\n\n")
+
+	warning := fmt.Sprintf("Delete repository '%s'?", d.repositoryName)
+	b.WriteString(itemStyle.Render(warning))
+	b.WriteString("\n\n")
+
+	b.WriteString(itemStyle.Render("This will:"))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  • Delete all worktrees"))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  • Remove the repository directory from disk"))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  • Remove from configuration"))
+	b.WriteString("\n\n")
+
+	hint := infoStyle.Render("⚠ This action CANNOT be undone.")
+	b.WriteString(hint)
+	b.WriteString("\n\n")
+
+	b.WriteString(helpStyle.Render("y: confirm  •  n/Esc: cancel"))
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#EF4444"}).
+		Padding(1, 2).
+		Width(60)
 
 	return dialogStyle.Render(b.String())
 }

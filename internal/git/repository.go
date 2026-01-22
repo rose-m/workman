@@ -193,9 +193,40 @@ func DeleteBranch(repoPath, branch string) error {
 	return nil
 }
 
+// DeleteRepository removes the entire repository directory from disk
+func DeleteRepository(repoPath string) error {
+	// Check if directory exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		return fmt.Errorf("repository directory does not exist: %s", repoPath)
+	}
+
+	// Remove the entire directory tree
+	if err := os.RemoveAll(repoPath); err != nil {
+		return fmt.Errorf("failed to delete repository directory: %w", err)
+	}
+
+	return nil
+}
+
 // CloneRepository clones a remote repository to the specified path
-// TODO: Implement actual git clone
 func CloneRepository(url, targetPath string) error {
-	// Placeholder implementation
+	// Check if target path already exists
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("target path already exists: %s", targetPath)
+	}
+
+	// Create parent directory if it doesn't exist
+	parentDir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory: %w", err)
+	}
+
+	// Clone the repository
+	cmd := exec.Command("git", "clone", url, targetPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to clone repository: %w\nOutput: %s", err, string(output))
+	}
+
 	return nil
 }

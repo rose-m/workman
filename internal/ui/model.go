@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -14,15 +15,16 @@ import (
 )
 
 type Model struct {
-	state               *state.AppState
-	width               int
-	height              int
-	dialogType          DialogType
-	addRepoDialog       AddRepoDialog
-	addWorktreeDialog   AddWorktreeDialog
-	confirmDeleteDialog ConfirmDeleteDialog
-	errorMsg            string
-	successMsg          string
+	state                   *state.AppState
+	width                   int
+	height                  int
+	dialogType              DialogType
+	addRepoDialog           AddRepoDialog
+	addWorktreeDialog       AddWorktreeDialog
+	confirmDeleteDialog     ConfirmDeleteDialog
+	confirmDeleteRepoDialog ConfirmDeleteRepositoryDialog
+	errorMsg                string
+	successMsg              string
 }
 
 func NewModel(appState *state.AppState) Model {
@@ -125,8 +127,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "-":
-			// Only allow deletion in worktrees pane
-			if m.state.ActivePane == state.WorktreesPane {
+			// Handle deletion based on active pane
+			switch m.state.ActivePane {
+			case state.ReposPane:
+				// Delete repository
+				if len(m.state.Config.Repositories) > 0 {
+					selectedRepo := m.state.GetSelectedRepo()
+					if selectedRepo != nil {
+						m.dialogType = DialogConfirmDeleteRepo
+						m.confirmDeleteRepoDialog = NewConfirmDeleteRepositoryDialog(selectedRepo.Name)
+						m.errorMsg = ""
+						m.successMsg = ""
+					}
+				}
+			case state.WorktreesPane:
+				// Delete worktree
 				if len(m.state.Worktrees) > 0 && m.state.GetSelectedRepo() != nil {
 					selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
 					// Don't allow deleting the main worktree (first one)
@@ -158,9 +173,12 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "y":
-		// Confirm action (only for confirmation dialog)
-		if m.dialogType == DialogConfirmDelete {
+		// Confirm action (only for confirmation dialogs)
+		switch m.dialogType {
+		case DialogConfirmDelete:
 			return m.deleteWorktree()
+		case DialogConfirmDeleteRepo:
+			return m.deleteRepository()
 		}
 		return m, nil
 
@@ -201,14 +219,7 @@ func (m Model) saveRepository() (tea.Model, tea.Cmd) {
 	}
 
 	// Get values
-	name, repoType, path := m.addRepoDialog.GetValues()
-
-	// For local repos, verify path exists
-	if repoType == "local" {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return m, showError("Path does not exist")
-		}
-	}
+	name, repoType, pathOrURL := m.addRepoDialog.GetValues()
 
 	// Check for duplicate names
 	for _, repo := range m.state.Config.Repositories {
@@ -217,17 +228,45 @@ func (m Model) saveRepository() (tea.Model, tea.Cmd) {
 		}
 	}
 
+	var repoPath string
+	var repoURL string
+
+	if repoType == "local" {
+		// For local repos, verify path exists
+		if _, err := os.Stat(pathOrURL); os.IsNotExist(err) {
+			return m, showError("Path does not exist")
+		}
+		repoPath = pathOrURL
+	} else {
+		// For remote repos, clone immediately
+		repoURL = pathOrURL
+
+		// Sanitize the repo name for the directory
+		sanitizedName := sanitizeRepoName(name)
+
+		// Construct target path: <rootDir>/<sanitized-name>
+		rootDir := strings.TrimSpace(m.state.Config.RootDirectory)
+		if rootDir == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return m, showError(fmt.Sprintf("Failed to get home directory: %v", err))
+			}
+			rootDir = homeDir
+		}
+		repoPath = filepath.Join(rootDir, sanitizedName)
+
+		// Clone the repository
+		if err := git.CloneRepository(repoURL, repoPath); err != nil {
+			return m, showError(fmt.Sprintf("Failed to clone repository: %v", err))
+		}
+	}
+
 	// Create new repository
 	newRepo := config.Repository{
 		Name: name,
 		Type: repoType,
-		Path: path,
-	}
-
-	if repoType == "remote" {
-		newRepo.URL = path
-		// For remote repos, we'll need to clone them later
-		// For now, just save the URL
+		Path: repoPath,
+		URL:  repoURL,
 	}
 
 	// Add to config
@@ -238,11 +277,37 @@ func (m Model) saveRepository() (tea.Model, tea.Cmd) {
 		return m, showError(fmt.Sprintf("Failed to save config: %v", err))
 	}
 
+	// Select the newly added repository and load its worktrees
+	m.state.SelectedRepoIndex = len(m.state.Config.Repositories) - 1
+	m = m.loadWorktrees()
+
 	// Close dialog
 	m.dialogType = DialogNone
 	m.errorMsg = ""
 
-	return m, nil
+	return m, showSuccess(fmt.Sprintf("Repository '%s' added successfully", name))
+}
+
+// sanitizeRepoName converts a repository name to a safe directory name
+func sanitizeRepoName(name string) string {
+	// Replace any non-alphanumeric characters (except dash) with dash
+	result := ""
+	for _, ch := range name {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			result += string(ch)
+		} else {
+			result += "-"
+		}
+	}
+
+	// Remove leading/trailing dashes and collapse multiple dashes
+	result = strings.Trim(result, "-")
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+
+	// Convert to lowercase for consistency
+	return strings.ToLower(result)
 }
 
 func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
@@ -323,6 +388,88 @@ func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {
 	m.errorMsg = ""
 
 	return m, nil
+}
+
+func (m Model) deleteRepository() (tea.Model, tea.Cmd) {
+	// Get selected repository
+	repo := m.state.GetSelectedRepo()
+	if repo == nil {
+		return m, showError("No repository selected")
+	}
+
+	// Track errors
+	var errors []string
+
+	// List all worktrees for the repository
+	worktrees, err := git.ListWorktrees(repo.Path)
+	if err != nil && !os.IsNotExist(err) {
+		// If we can't list worktrees and it's not because the repo doesn't exist, fail
+		errors = append(errors, fmt.Sprintf("Failed to list worktrees: %v", err))
+	} else {
+		// Delete each worktree (except the main one which will be deleted with the repo)
+		for i, wt := range worktrees {
+			if i == 0 {
+				// Skip the main worktree - it will be deleted with the repository
+				continue
+			}
+
+			// Remove worktree
+			if err := git.RemoveWorktree(repo.Path, wt.Path); err != nil {
+				errors = append(errors, fmt.Sprintf("Failed to remove worktree '%s': %v", wt.Name, err))
+				continue
+			}
+
+			// Delete branch
+			if err := git.DeleteBranch(repo.Path, wt.Branch); err != nil {
+				// Don't treat branch deletion failure as critical since worktree is removed
+				// Just log it but continue
+			}
+		}
+	}
+
+	// If we had errors deleting worktrees, don't proceed with repo deletion
+	if len(errors) > 0 {
+		m.dialogType = DialogNone
+		return m, showError(fmt.Sprintf("Errors during deletion:\n%s\nRepository kept in config.", strings.Join(errors, "\n")))
+	}
+
+	// Delete repository directory
+	if err := git.DeleteRepository(repo.Path); err != nil {
+		// Check if directory doesn't exist - that's ok, we'll still remove from config
+		if !os.IsNotExist(err) {
+			m.dialogType = DialogNone
+			return m, showError(fmt.Sprintf("Failed to delete repository: %v\nRepository kept in config.", err))
+		}
+		// Directory doesn't exist - that's fine, continue with config removal
+	}
+
+	// Remove repository from config
+	repoIndex := m.state.SelectedRepoIndex
+	m.state.Config.Repositories = append(
+		m.state.Config.Repositories[:repoIndex],
+		m.state.Config.Repositories[repoIndex+1:]...,
+	)
+
+	// Save config
+	if err := config.Save(m.state.Config); err != nil {
+		return m, showError(fmt.Sprintf("Failed to save config: %v", err))
+	}
+
+	// Adjust selected repository index
+	if len(m.state.Config.Repositories) == 0 {
+		m.state.SelectedRepoIndex = 0
+	} else if m.state.SelectedRepoIndex >= len(m.state.Config.Repositories) {
+		m.state.SelectedRepoIndex = len(m.state.Config.Repositories) - 1
+	}
+
+	// Reload worktrees for the new selected repository
+	m = m.loadWorktrees()
+
+	// Close dialog
+	m.dialogType = DialogNone
+	m.errorMsg = ""
+
+	return m, showSuccess(fmt.Sprintf("Repository '%s' deleted successfully", repo.Name))
 }
 
 func (m Model) yankWorktreeCommand() (tea.Model, tea.Cmd) {
@@ -441,6 +588,8 @@ func (m Model) View() string {
 			dialog = m.addWorktreeDialog.View()
 		case DialogConfirmDelete:
 			dialog = m.confirmDeleteDialog.View()
+		case DialogConfirmDeleteRepo:
+			dialog = m.confirmDeleteRepoDialog.View()
 		}
 
 		// Add error message if present
