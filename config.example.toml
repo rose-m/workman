@@ -16,9 +16,17 @@ name = "example-local"
 type = "local"
 path = "/path/to/existing/repo"
 url = ""
+post_create_script = ""
 
 [[repositories]]
 name = "example-remote"
 type = "remote"
 url = "https://github.com/username/repo.git"
 path = "/Users/yourusername/workspace/repo"
+post_create_script = """
+# Example post-create script - runs after each worktree creation
+# Arguments: $1 = repo path, $2 = worktree path
+echo "Setting up worktree at $2"
+cd "$2"
+npm install
+"""

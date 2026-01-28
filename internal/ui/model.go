@@ -24,6 +24,7 @@ type Model struct {
 	addWorktreeDialog       AddWorktreeDialog
 	confirmDeleteDialog     ConfirmDeleteDialog
 	confirmDeleteRepoDialog ConfirmDeleteRepositoryDialog
+	editScriptDialog        EditScriptDialog
 	editingNotes            bool
 	notesTextarea           textarea.Model
 	editingWorktreePath     string
@@ -133,6 +134,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.editingNotes = true
 					m.notesTextarea = ta
 					m.editingWorktreePath = selectedWT.Path
+					m.errorMsg = ""
+					m.successMsg = ""
+				}
+			}
+			return m, nil
+
+		case "s":
+			if m.state.ActivePane == state.ReposPane {
+				if repo := m.state.GetSelectedRepo(); repo != nil {
+					m.dialogType = DialogEditScript
+					m.editScriptDialog = NewEditScriptDialog(repo.Name, repo.PostCreateScript)
 					m.errorMsg = ""
 					m.successMsg = ""
 				}
@@ -271,6 +283,8 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.saveRepository()
 		case DialogAddWorktree:
 			return m.saveWorktree()
+		case DialogEditScript:
+			return m.saveScript()
 		}
 		return m, nil
 	}
@@ -284,6 +298,11 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case DialogAddWorktree:
 		cmd := m.addWorktreeDialog.Update(msg)
+		m.errorMsg = ""
+		m.successMsg = ""
+		return m, cmd
+	case DialogEditScript:
+		cmd := m.editScriptDialog.Update(msg)
 		m.errorMsg = ""
 		m.successMsg = ""
 		return m, cmd
@@ -414,18 +433,64 @@ func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
 		return m, showError(fmt.Sprintf("Failed to create worktree: %v", err))
 	}
 
-	// Reload worktrees
+	// Reload worktrees to get the new worktree path
 	worktrees, err := git.ListWorktrees(repo.Path)
 	if err != nil {
 		return m, showError(fmt.Sprintf("Failed to list worktrees: %v", err))
 	}
 	m.state.Worktrees = worktrees
 
+	// Execute post-create script if configured
+	if repo.PostCreateScript != "" {
+		// Find the newly created worktree
+		var newWorktreePath string
+		for _, wt := range worktrees {
+			if wt.Branch == branch {
+				newWorktreePath = wt.Path
+				break
+			}
+		}
+
+		if newWorktreePath != "" {
+			if err := git.ExecutePostCreateScript(repo.PostCreateScript, repo.Path, newWorktreePath); err != nil {
+				m.dialogType = DialogNone
+				m.errorMsg = ""
+				return m, showError(fmt.Sprintf("Worktree created but script failed: %v", err))
+			}
+		}
+	}
+
 	// Close dialog
 	m.dialogType = DialogNone
 	m.errorMsg = ""
 
-	return m, nil
+	return m, showSuccess("Worktree created successfully")
+}
+
+func (m Model) saveScript() (tea.Model, tea.Cmd) {
+	// Get selected repository
+	repo := m.state.GetSelectedRepo()
+	if repo == nil {
+		return m, showError("No repository selected")
+	}
+
+	// Get the script from the dialog
+	script := m.editScriptDialog.GetScript()
+
+	// Update the repository configuration
+	repoIndex := m.state.SelectedRepoIndex
+	m.state.Config.Repositories[repoIndex].PostCreateScript = script
+
+	// Save config
+	if err := config.Save(m.state.Config); err != nil {
+		return m, showError(fmt.Sprintf("Failed to save config: %v", err))
+	}
+
+	// Close dialog
+	m.dialogType = DialogNone
+	m.errorMsg = ""
+
+	return m, showSuccess("Post-create script saved")
 }
 
 func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {
@@ -685,6 +750,8 @@ func (m Model) View() string {
 			dialog = m.confirmDeleteDialog.View()
 		case DialogConfirmDeleteRepo:
 			dialog = m.confirmDeleteRepoDialog.View()
+		case DialogEditScript:
+			dialog = m.editScriptDialog.View()
 		}
 
 		// Add error message if present
@@ -723,7 +790,11 @@ func (m Model) renderReposPanel(width, height int) string {
 		items = append(items, infoStyle.Render("Press '+' to add one"))
 	} else {
 		for i, repo := range m.state.Config.Repositories {
-			itemText := fmt.Sprintf("%s (%s)", repo.Name, repo.Type)
+			scriptIndicator := ""
+			if repo.PostCreateScript != "" {
+				scriptIndicator = " 📜"
+			}
+			itemText := fmt.Sprintf("%s (%s)%s", repo.Name, repo.Type, scriptIndicator)
 			if isActive && i == m.state.SelectedRepoIndex {
 				items = append(items, selectedItemStyle.Render("> "+itemText))
 			} else {
@@ -832,7 +903,7 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 
 func (m Model) renderHelp() string {
 	help := []string{
-		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Notes: n   Yank: y   Quit: q or ctrl+c",
+		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Notes: n   Script: s   Yank: y   Quit: q or ctrl+c",
 	}
 	return helpStyle.Render(strings.Join(help, " • "))
 }

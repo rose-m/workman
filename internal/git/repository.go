@@ -245,6 +245,23 @@ func ListBranches(repoPath string) ([]string, error) {
 	return branches, nil
 }
 
+// ExecutePostCreateScript executes a bash script after worktree creation
+// The script receives two arguments: repo path and worktree path
+func ExecutePostCreateScript(script, repoPath, worktreePath string) error {
+	if script == "" {
+		return nil
+	}
+
+	cmd := exec.Command("bash", "-c", script, "--", repoPath, worktreePath)
+	cmd.Dir = worktreePath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("script execution failed: %w\nOutput: %s", err, string(output))
+	}
+
+	return nil
+}
+
 // CloneRepository clones a remote repository to the specified path
 func CloneRepository(url, targetPath string) error {
 	// Check if target path already exists

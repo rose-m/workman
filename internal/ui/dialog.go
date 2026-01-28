@@ -19,6 +19,7 @@ const (
 	DialogConfirmDelete
 	DialogConfirmDeleteRepo
 	DialogEditNotes
+	DialogEditScript
 )
 
 type AddRepoDialog struct {
@@ -178,10 +179,10 @@ func (d *AddRepoDialog) Reset() {
 
 // AddWorktreeDialog handles the worktree creation dialog
 type AddWorktreeDialog struct {
-	focusIndex       int
-	input            textinput.Model
-	branches         []string
-	suggestions      []string
+	focusIndex         int
+	input              textinput.Model
+	branches           []string
+	suggestions        []string
 	selectedSuggestion int
 }
 
@@ -193,10 +194,10 @@ func NewAddWorktreeDialog(branches []string) AddWorktreeDialog {
 	input.Width = 50
 
 	return AddWorktreeDialog{
-		focusIndex:       0,
-		input:            input,
-		branches:         branches,
-		suggestions:      []string{},
+		focusIndex:         0,
+		input:              input,
+		branches:           branches,
+		suggestions:        []string{},
 		selectedSuggestion: 0,
 	}
 }
@@ -487,6 +488,60 @@ func (d *EditNotesDialog) GetNotes() string {
 
 func (d *EditNotesDialog) GetWorktreePath() string {
 	return d.worktreePath
+}
+
+// EditScriptDialog handles editing post-create script for a repository
+type EditScriptDialog struct {
+	repoName string
+	textarea textarea.Model
+}
+
+func NewEditScriptDialog(repoName, currentScript string) EditScriptDialog {
+	ta := textarea.New()
+	ta.SetWidth(70)
+	ta.SetHeight(10)
+	ta.Focus()
+	ta.SetValue(currentScript)
+	ta.CharLimit = 10000
+
+	return EditScriptDialog{
+		repoName: repoName,
+		textarea: ta,
+	}
+}
+
+func (d *EditScriptDialog) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	d.textarea, cmd = d.textarea.Update(msg)
+	return cmd
+}
+
+func (d *EditScriptDialog) View() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render(fmt.Sprintf("Post-Create Script - %s", d.repoName)))
+	b.WriteString("\n\n")
+
+	hint := infoStyle.Render("Script runs after each worktree creation. Args: $1=repo_path $2=worktree_path")
+	b.WriteString(hint)
+	b.WriteString("\n\n")
+
+	b.WriteString(d.textarea.View())
+	b.WriteString("\n\n")
+
+	b.WriteString(helpStyle.Render("Ctrl+S: save  •  Esc: cancel"))
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor).
+		Padding(1, 2).
+		Width(76)
+
+	return dialogStyle.Render(b.String())
+}
+
+func (d *EditScriptDialog) GetScript() string {
+	return strings.TrimSpace(d.textarea.Value())
 }
 
 type errorMsg struct {

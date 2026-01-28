@@ -8,10 +8,11 @@ import (
 )
 
 type Repository struct {
-	Name string `mapstructure:"name"`
-	Path string `mapstructure:"path"`
-	Type string `mapstructure:"type"` // "remote" or "local"
-	URL  string `mapstructure:"url"`  // For remote repos
+	Name             string `mapstructure:"name"`
+	Path             string `mapstructure:"path"`
+	Type             string `mapstructure:"type"`               // "remote" or "local"
+	URL              string `mapstructure:"url"`                // For remote repos
+	PostCreateScript string `mapstructure:"post_create_script"` // Script to run after creating worktrees
 }
 
 type WorktreeNote struct {
