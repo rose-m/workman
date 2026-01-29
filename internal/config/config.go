@@ -89,10 +89,42 @@ func Load() (*Config, error) {
 
 func Save(cfg *Config) error {
 	viper.Set("root_directory", cfg.RootDirectory)
-	viper.Set("repositories", cfg.Repositories)
+	viper.Set("repositories", repositoriesToMaps(cfg.Repositories))
 	viper.Set("yank_template", cfg.YankTemplate)
-	viper.Set("worktree_notes", cfg.WorktreeNotes)
+	viper.Set("worktree_notes", worktreeNotesToMaps(cfg.WorktreeNotes))
 	return viper.WriteConfig()
+}
+
+// repositoriesToMaps converts Repository structs to maps with snake_case keys.
+// This is necessary because viper.Set() uses Go field names (capitalized) when
+// serializing structs, but viper.Unmarshal() expects mapstructure tag names
+// (snake_case). Without this conversion, fields like PostCreateScript would be
+// written as "PostCreateScript" but read as "post_create_script", causing data loss.
+func repositoriesToMaps(repos []Repository) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(repos))
+	for i, repo := range repos {
+		result[i] = map[string]interface{}{
+			"name":               repo.Name,
+			"path":               repo.Path,
+			"type":               repo.Type,
+			"url":                repo.URL,
+			"post_create_script": repo.PostCreateScript,
+		}
+	}
+	return result
+}
+
+// worktreeNotesToMaps converts WorktreeNote structs to maps with snake_case keys.
+// See repositoriesToMaps for explanation of why this is necessary.
+func worktreeNotesToMaps(notes []WorktreeNote) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(notes))
+	for i, note := range notes {
+		result[i] = map[string]interface{}{
+			"path":  note.Path,
+			"notes": note.Notes,
+		}
+	}
+	return result
 }
 
 // GetWorktreeNotes returns the notes for a given worktree path
