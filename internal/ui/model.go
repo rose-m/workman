@@ -251,7 +251,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state.GetSelectedRepo() != nil {
 				// Execute enter_script
 				if err := m.executeScript(m.state.Config.EnterScript); err != nil {
-					m.errorMsg = fmt.Sprintf("Enter key: %v. Configure 'enter_script' in config.toml", err)
+					m.errorMsg = fmt.Sprintf("Enter key: %v. Set 'enter_script' to a script file path in config.toml", err)
 					m.successMsg = ""
 				} else {
 					m.successMsg = "Script executed"
@@ -934,18 +934,33 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 		Render(content)
 }
 
-// executeScript executes a script template with variable substitution
-// Returns error if script is empty or execution fails
-func (m Model) executeScript(scriptTemplate string) error {
-	if scriptTemplate == "" {
+// executeScript executes a script file with variable substitution
+// Returns error if script path is empty or execution fails
+func (m Model) executeScript(scriptPath string) error {
+	if scriptPath == "" {
 		return fmt.Errorf("no script configured")
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(scriptPath, "~") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		scriptPath = filepath.Join(homeDir, scriptPath[1:])
+	}
+
+	// Read script file
+	scriptContent, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return fmt.Errorf("failed to read script file %s: %w", scriptPath, err)
 	}
 
 	selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
 	selectedRepo := m.state.GetSelectedRepo()
 
 	// Variable substitution
-	script := scriptTemplate
+	script := string(scriptContent)
 	script = strings.ReplaceAll(script, "${worktree_path}", selectedWT.Path)
 	script = strings.ReplaceAll(script, "${path}", selectedWT.Path)
 	script = strings.ReplaceAll(script, "${branch_name}", selectedWT.Branch)
@@ -957,7 +972,7 @@ func (m Model) executeScript(scriptTemplate string) error {
 
 	// Execute the script
 	cmd := exec.Command("sh", "-c", script)
-	err := cmd.Start()
+	err = cmd.Start()
 	if err != nil {
 		return fmt.Errorf("failed to execute script: %w", err)
 	}

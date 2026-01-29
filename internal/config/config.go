@@ -20,7 +20,7 @@ type Config struct {
 	RootDirectory string       `mapstructure:"root_directory"`
 	Repositories  []Repository `mapstructure:"repositories"`
 	YankTemplate  string       `mapstructure:"yank_template"`
-	EnterScript   string       `mapstructure:"enter_script"`
+	EnterScript   string       `mapstructure:"enter_script"` // Path to script file to execute on Enter
 }
 
 func DefaultConfig() *Config {

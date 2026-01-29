@@ -88,73 +88,61 @@ You can also add repositories directly through the UI by pressing `+` when in th
 
 ## Terminal Integration
 
-Workman can execute a custom script when you press `Enter` on a worktree. This allows you to open terminals, create splits, or run any command with the worktree path.
+Workman can execute a custom script file when you press `Enter` on a worktree. This allows you to open terminals, create splits, or run any command with the worktree path.
 
-Configure this in your `~/.config/workman/config.toml`:
+Configure the script file path in your `~/.config/workman/config.toml`:
 
-### Simple Examples
+```toml
+enter_script = "~/.config/workman/enter-worktree.sh"
+```
+
+### Creating Your Script File
+
+Create a shell script file (e.g., `~/.config/workman/enter-worktree.sh`) with your desired behavior:
+
+**Ghostty (macOS) - Create split using Command+D keybinding:**
+```bash
+#!/bin/bash
+# ~/.config/workman/enter-worktree.sh
+osascript -e 'tell application "System Events" to keystroke "d" using command down'
+sleep 0.2
+osascript -e 'tell application "System Events" to keystroke "cd ${worktree_path}" & return'
+```
 
 **tmux - Open split:**
-```toml
-enter_script = "tmux split-window -h -c '${worktree_path}'"
+```bash
+#!/bin/bash
+tmux split-window -h -c '${worktree_path}'
 ```
 
 **Ghostty (macOS) - Open new window:**
-```toml
-enter_script = "open -na ghostty --args --working-directory='${worktree_path}'"
+```bash
+#!/bin/bash
+open -na ghostty --args --working-directory='${worktree_path}'
 ```
 
-**Ghostty (macOS) - Create split using Command+D keybinding:**
-```toml
-enter_script = "osascript -e 'tell application \"System Events\" to keystroke \"d\" using command down' && sleep 0.2 && osascript -e 'tell application \"System Events\" to keystroke \"cd ${worktree_path}\" & return'"
-```
-
-**Ghostty (Linux) - Open new window:**
-```toml
-enter_script = "ghostty --working-directory='${worktree_path}' &"
-```
-
-### Advanced Examples: Running Commands After Opening
-
-**Open Ghostty window and start Claude Code:**
-```toml
-# macOS
-enter_script = "open -na ghostty --args --working-directory='${worktree_path}' -e 'claude' &"
-
-# Linux
-enter_script = "ghostty --working-directory='${worktree_path}' -e 'claude' &"
+**Ghostty (macOS) - Create split and start Claude Code:**
+```bash
+#!/bin/bash
+osascript -e 'tell application "System Events" to keystroke "d" using command down'
+sleep 0.2
+osascript -e 'tell application "System Events" to keystroke "cd ${worktree_path} && claude" & return'
 ```
 
 **tmux split and start Claude Code:**
-```toml
-enter_script = "tmux split-window -h -c '${worktree_path}' claude"
+```bash
+#!/bin/bash
+tmux split-window -h -c '${worktree_path}' claude
 ```
 
-**iTerm2 - Open new window, cd, and start editor:**
-```toml
-enter_script = "osascript -e 'tell application \"iTerm\" to create window with default profile command \"cd ${worktree_path} && nvim\"'"
-```
-
-**Alacritty - Open window and start shell with command:**
-```toml
-enter_script = "alacritty --working-directory '${worktree_path}' -e zsh -c 'clear && pwd && zsh' &"
-```
-
-**Terminal.app (macOS) - Open tab and run command:**
-```toml
-enter_script = "osascript -e 'tell application \"Terminal\" to do script \"cd ${worktree_path} && claude\"'"
-```
-
-**Open split in current terminal and run git status:**
-```toml
-# In tmux
-enter_script = "tmux split-window -h -c '${worktree_path}' 'git status; exec $SHELL'"
-
-# In kitty
-enter_script = "kitty @ launch --type=tab --cwd='${worktree_path}' --title '${repo_name}/${branch}' sh -c 'git status; exec $SHELL'"
+Don't forget to make your script executable:
+```bash
+chmod +x ~/.config/workman/enter-worktree.sh
 ```
 
 ### Available Variables
+
+The following variables will be substituted in your script:
 
 - `${worktree_path}` or `${path}` - Full path to the worktree
 - `${branch_name}` or `${branch}` - Git branch name
@@ -162,12 +150,11 @@ enter_script = "kitty @ launch --type=tab --cwd='${worktree_path}' --title '${re
 
 ### Tips
 
-- Leave scripts empty to disable the keybinding (pressing the key will show an error prompting configuration)
-- Scripts are executed with `sh -c`, so you can chain commands with `&&` or `;`
-- Add `&` at the end to run commands in the background (non-blocking)
+- Leave `enter_script` empty to disable the keybinding
+- Scripts are executed with `sh -c`, so they must be shell-compatible
+- Use `~` in the path to reference your home directory
+- Add `&` at the end of commands to run them in the background (non-blocking)
 - Use `exec $SHELL` at the end to keep terminal open after command finishes
-- Wrap commands in quotes when they contain spaces or special characters
-- Use `-e` flag in terminals to execute commands directly
 
 ## Keyboard Shortcuts
 
