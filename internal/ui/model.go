@@ -440,6 +440,14 @@ func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
 	}
 	m.state.Worktrees = worktrees
 
+	// Select the newly created worktree
+	for i, wt := range worktrees {
+		if wt.Branch == branch {
+			m.state.SelectedWTIndex = i
+			break
+		}
+	}
+
 	// Execute post-create script if configured
 	if repo.PostCreateScript != "" {
 		// Find the newly created worktree
