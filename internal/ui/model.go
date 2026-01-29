@@ -268,13 +268,13 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "y":
 		// Confirm action (only for confirmation dialogs)
+		// For other dialogs, fall through to pass "y" to the input handler
 		switch m.dialogType {
 		case DialogConfirmDelete:
 			return m.deleteWorktree()
 		case DialogConfirmDeleteRepo:
 			return m.deleteRepository()
 		}
-		return m, nil
 
 	case "ctrl+s":
 		// Save based on dialog type
