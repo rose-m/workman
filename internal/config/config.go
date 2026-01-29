@@ -20,6 +20,7 @@ type Config struct {
 	RootDirectory string       `mapstructure:"root_directory"`
 	Repositories  []Repository `mapstructure:"repositories"`
 	YankTemplate  string       `mapstructure:"yank_template"`
+	EnterScript   string       `mapstructure:"enter_script"`
 }
 
 func DefaultConfig() *Config {
@@ -28,6 +29,7 @@ func DefaultConfig() *Config {
 		RootDirectory: filepath.Join(homeDir, "workspace"),
 		Repositories:  []Repository{},
 		YankTemplate:  "${worktree_path}",
+		EnterScript:   "",
 	}
 }
 
@@ -53,6 +55,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("root_directory", defaultCfg.RootDirectory)
 	viper.SetDefault("repositories", defaultCfg.Repositories)
 	viper.SetDefault("yank_template", defaultCfg.YankTemplate)
+	viper.SetDefault("enter_script", defaultCfg.EnterScript)
 
 	// If config file doesn't exist, create it with defaults
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
@@ -90,6 +93,7 @@ func Save(cfg *Config) error {
 	viper.Set("root_directory", cfg.RootDirectory)
 	viper.Set("repositories", repositoriesToMaps(cfg.Repositories))
 	viper.Set("yank_template", cfg.YankTemplate)
+	viper.Set("enter_script", cfg.EnterScript)
 	return viper.WriteConfig()
 }
 

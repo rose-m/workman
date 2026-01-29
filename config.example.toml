@@ -10,6 +10,17 @@ root_directory = "/Users/yourusername/workspace"
 # Example: yank_template = 'wt "${repo_name} - ${branch_name}"; cd "${worktree_path}"'
 yank_template = "${worktree_path}"
 
+# Script to execute when pressing Enter on a worktree
+# Leave empty to disable. Available variables: ${worktree_path}, ${branch_name}, ${repo_name}
+# Scripts are executed with 'sh -c', so you can chain commands with && or ;
+
+# Examples:
+# enter_script = "tmux split-window -h -c '${worktree_path}'"                    # tmux split
+# enter_script = "open -na ghostty --args --working-directory='${worktree_path}'" # Ghostty new window
+# enter_script = "osascript -e 'tell application \"System Events\" to keystroke \"d\" using command down' && sleep 0.2 && osascript -e 'tell application \"System Events\" to keystroke \"cd ${worktree_path}\" & return'" # Ghostty split (triggers Command+D)
+
+enter_script = ""
+
 # List of repositories
 [[repositories]]
 name = "example-local"

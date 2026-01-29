@@ -244,6 +244,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+
+		case "enter":
+			if m.state.ActivePane == state.WorktreesPane &&
+				len(m.state.Worktrees) > 0 &&
+				m.state.GetSelectedRepo() != nil {
+				// Execute enter_script
+				if err := m.executeScript(m.state.Config.EnterScript); err != nil {
+					m.errorMsg = fmt.Sprintf("Enter key: %v. Configure 'enter_script' in config.toml", err)
+					m.successMsg = ""
+				} else {
+					m.successMsg = "Script executed"
+					m.errorMsg = ""
+				}
+			}
+			return m, nil
 		}
 	}
 
@@ -919,9 +934,41 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 		Render(content)
 }
 
+// executeScript executes a script template with variable substitution
+// Returns error if script is empty or execution fails
+func (m Model) executeScript(scriptTemplate string) error {
+	if scriptTemplate == "" {
+		return fmt.Errorf("no script configured")
+	}
+
+	selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
+	selectedRepo := m.state.GetSelectedRepo()
+
+	// Variable substitution
+	script := scriptTemplate
+	script = strings.ReplaceAll(script, "${worktree_path}", selectedWT.Path)
+	script = strings.ReplaceAll(script, "${path}", selectedWT.Path)
+	script = strings.ReplaceAll(script, "${branch_name}", selectedWT.Branch)
+	script = strings.ReplaceAll(script, "${branch}", selectedWT.Branch)
+	if selectedRepo != nil {
+		script = strings.ReplaceAll(script, "${repo_name}", selectedRepo.Name)
+		script = strings.ReplaceAll(script, "${repo}", selectedRepo.Name)
+	}
+
+	// Execute the script
+	cmd := exec.Command("sh", "-c", script)
+	err := cmd.Start()
+	if err != nil {
+		return fmt.Errorf("failed to execute script: %w", err)
+	}
+
+	// Don't wait for the command - let it run independently
+	return nil
+}
+
 func (m Model) renderHelp() string {
 	help := []string{
-		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Notes: n   Script: s   Yank: y   Quit: q or ctrl+c",
+		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Notes: n   Script: s   Yank: y   Open: Enter   Quit: q or ctrl+c",
 	}
 	return helpStyle.Render(strings.Join(help, " • "))
 }
