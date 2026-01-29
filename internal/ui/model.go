@@ -3,11 +3,11 @@ package ui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/michael-rose/workman/internal/config"
@@ -24,12 +24,23 @@ type Model struct {
 	addWorktreeDialog       AddWorktreeDialog
 	confirmDeleteDialog     ConfirmDeleteDialog
 	confirmDeleteRepoDialog ConfirmDeleteRepositoryDialog
-	editScriptDialog        EditScriptDialog
-	editingNotes            bool
-	notesTextarea           textarea.Model
-	editingWorktreePath     string
 	errorMsg                string
 	successMsg              string
+}
+
+type editTarget int
+
+const (
+	editNotesTarget editTarget = iota
+	editScriptTarget
+)
+
+type editorFinishedMsg struct {
+	err          error
+	target       editTarget
+	repoName     string
+	worktreeName string
+	tempPath     string
 }
 
 func NewModel(appState *state.AppState) Model {
@@ -63,12 +74,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.successMsg = msg.msg
 		return m, nil
 
-	case tea.KeyMsg:
-		// Handle inline notes editing mode
-		if m.editingNotes {
-			return m.handleNotesEditingKeys(msg)
+	case editorFinishedMsg:
+		if msg.tempPath != "" {
+			defer func() {
+				_ = os.Remove(msg.tempPath)
+			}()
 		}
 
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("Editor failed: %v", msg.err)
+			m.successMsg = ""
+			return m, nil
+		}
+
+		content, err := os.ReadFile(msg.tempPath)
+		if err != nil {
+			m.errorMsg = fmt.Sprintf("Failed to read editor file: %v", err)
+			m.successMsg = ""
+			return m, nil
+		}
+
+		value := strings.TrimSpace(string(content))
+		switch msg.target {
+		case editNotesTarget:
+			if err := config.SaveWorktreeNotes(msg.repoName, msg.worktreeName, value); err != nil {
+				m.errorMsg = fmt.Sprintf("Failed to save notes: %v", err)
+				m.successMsg = ""
+				return m, nil
+			}
+			m.errorMsg = ""
+			return m, showSuccess("Notes saved")
+		case editScriptTarget:
+			if err := config.SaveRepoScript(msg.repoName, value); err != nil {
+				m.errorMsg = fmt.Sprintf("Failed to save script: %v", err)
+				m.successMsg = ""
+				return m, nil
+			}
+			m.errorMsg = ""
+			return m, showSuccess("Post-create script saved")
+		}
+
+		return m, nil
+
+	case tea.KeyMsg:
 		// Handle dialog mode
 		if m.dialogType != DialogNone {
 			return m.handleDialogKeys(msg)
@@ -121,21 +169,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state.ActivePane == state.WorktreesPane {
 				if len(m.state.Worktrees) > 0 && m.state.GetSelectedRepo() != nil {
 					selectedWT := m.state.Worktrees[m.state.SelectedWTIndex]
-					currentNotes := m.state.Config.GetWorktreeNotes(selectedWT.Path)
-
-					// Create and configure textarea for inline editing
-					ta := textarea.New()
-					ta.SetWidth(60)
-					ta.SetHeight(6)
-					ta.Focus()
-					ta.SetValue(currentNotes)
-					ta.CharLimit = 2000
-
-					m.editingNotes = true
-					m.notesTextarea = ta
-					m.editingWorktreePath = selectedWT.Path
-					m.errorMsg = ""
-					m.successMsg = ""
+					repo := m.state.GetSelectedRepo()
+					currentNotes, err := config.GetWorktreeNotes(repo.Name, selectedWT.Name)
+					if err != nil {
+						return m, showError(fmt.Sprintf("Failed to load notes: %v", err))
+					}
+					return m.openEditor(editNotesTarget, repo.Name, selectedWT.Name, currentNotes)
 				}
 			}
 			return m, nil
@@ -143,10 +182,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if m.state.ActivePane == state.ReposPane {
 				if repo := m.state.GetSelectedRepo(); repo != nil {
-					m.dialogType = DialogEditScript
-					m.editScriptDialog = NewEditScriptDialog(repo.Name, repo.PostCreateScript)
-					m.errorMsg = ""
-					m.successMsg = ""
+					currentScript, err := config.GetRepoScript(repo.Name)
+					if err != nil {
+						return m, showError(fmt.Sprintf("Failed to load script: %v", err))
+					}
+					return m.openEditor(editScriptTarget, repo.Name, "", currentScript)
 				}
 			}
 			return m, nil
@@ -210,39 +250,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleNotesEditingKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+s":
-		// Save notes and exit editing mode
-		notes := strings.TrimSpace(m.notesTextarea.Value())
-
-		// Update notes in config (or remove if empty)
-		m.state.Config.SetWorktreeNotes(m.editingWorktreePath, notes)
-
-		// Save config
-		if err := config.Save(m.state.Config); err != nil {
-			m.errorMsg = fmt.Sprintf("Failed to save notes: %v", err)
-			m.successMsg = ""
-		} else {
-			m.successMsg = "Notes saved"
-			m.errorMsg = ""
-		}
-
-		// Exit editing mode
-		m.editingNotes = false
-		m.editingWorktreePath = ""
-		m.notesTextarea.Blur()
-
-		return m, nil
-
-	default:
-		// Pass all other keys to the textarea
-		var cmd tea.Cmd
-		m.notesTextarea, cmd = m.notesTextarea.Update(msg)
-		return m, cmd
-	}
-}
-
 func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
@@ -283,8 +290,6 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.saveRepository()
 		case DialogAddWorktree:
 			return m.saveWorktree()
-		case DialogEditScript:
-			return m.saveScript()
 		}
 		return m, nil
 	}
@@ -301,14 +306,52 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.errorMsg = ""
 		m.successMsg = ""
 		return m, cmd
-	case DialogEditScript:
-		cmd := m.editScriptDialog.Update(msg)
-		m.errorMsg = ""
-		m.successMsg = ""
-		return m, cmd
 	}
 
 	return m, nil
+}
+
+func (m Model) openEditor(target editTarget, repoName, worktreeName, content string) (tea.Model, tea.Cmd) {
+	prefix := "workman-edit-"
+	if target == editNotesTarget {
+		prefix = "workman-notes-"
+	} else if target == editScriptTarget {
+		prefix = "workman-script-"
+	}
+
+	tmpFile, err := os.CreateTemp("", prefix)
+	if err != nil {
+		return m, showError(fmt.Sprintf("Failed to create temp file: %v", err))
+	}
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		return m, showError(fmt.Sprintf("Failed to write temp file: %v", err))
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return m, showError(fmt.Sprintf("Failed to close temp file: %v", err))
+	}
+
+	editor := strings.TrimSpace(os.Getenv("EDITOR"))
+	if editor == "" {
+		editor = "vi"
+	}
+
+	cmd := exec.Command(editor, tmpFile.Name())
+	m.errorMsg = ""
+	m.successMsg = ""
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return editorFinishedMsg{
+			err:          err,
+			target:       target,
+			repoName:     repoName,
+			worktreeName: worktreeName,
+			tempPath:     tmpFile.Name(),
+		}
+	})
 }
 
 func (m Model) saveRepository() (tea.Model, tea.Cmd) {
@@ -449,7 +492,11 @@ func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
 	}
 
 	// Execute post-create script if configured
-	if repo.PostCreateScript != "" {
+	script, err := config.GetRepoScript(repo.Name)
+	if err != nil {
+		return m, showError(fmt.Sprintf("Failed to load post-create script: %v", err))
+	}
+	if script != "" {
 		// Find the newly created worktree
 		var newWorktreePath string
 		for _, wt := range worktrees {
@@ -460,7 +507,7 @@ func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
 		}
 
 		if newWorktreePath != "" {
-			if err := git.ExecutePostCreateScript(repo.PostCreateScript, repo.Path, newWorktreePath); err != nil {
+			if err := git.ExecutePostCreateScript(script, repo.Path, newWorktreePath); err != nil {
 				m.dialogType = DialogNone
 				m.errorMsg = ""
 				return m, showError(fmt.Sprintf("Worktree created but script failed: %v", err))
@@ -473,32 +520,6 @@ func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
 	m.errorMsg = ""
 
 	return m, showSuccess("Worktree created successfully")
-}
-
-func (m Model) saveScript() (tea.Model, tea.Cmd) {
-	// Get selected repository
-	repo := m.state.GetSelectedRepo()
-	if repo == nil {
-		return m, showError("No repository selected")
-	}
-
-	// Get the script from the dialog
-	script := m.editScriptDialog.GetScript()
-
-	// Update the repository configuration
-	repoIndex := m.state.SelectedRepoIndex
-	m.state.Config.Repositories[repoIndex].PostCreateScript = script
-
-	// Save config
-	if err := config.Save(m.state.Config); err != nil {
-		return m, showError(fmt.Sprintf("Failed to save config: %v", err))
-	}
-
-	// Close dialog
-	m.dialogType = DialogNone
-	m.errorMsg = ""
-
-	return m, showSuccess("Post-create script saved")
 }
 
 func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {
@@ -526,13 +547,7 @@ func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {
 	}
 
 	// Remove notes for this worktree
-	m.state.Config.DeleteWorktreeNotes(selectedWT.Path)
-
-	// Save config to persist notes deletion
-	if err := config.Save(m.state.Config); err != nil {
-		// Log error but don't fail the operation
-		// The worktree is already deleted
-	}
+	_ = config.DeleteWorktreeNotes(repo.Name, selectedWT.Name)
 
 	// Reload worktrees
 	worktrees, err := git.ListWorktrees(repo.Path)
@@ -606,10 +621,11 @@ func (m Model) deleteRepository() (tea.Model, tea.Cmd) {
 		// Directory doesn't exist - that's fine, continue with config removal
 	}
 
-	// Remove all notes for worktrees in this repository
+	// Remove all notes and script for this repository
 	for _, wt := range worktrees {
-		m.state.Config.DeleteWorktreeNotes(wt.Path)
+		_ = config.DeleteWorktreeNotes(repo.Name, wt.Name)
 	}
+	_ = config.DeleteRepoScript(repo.Name)
 
 	// Remove repository from config
 	repoIndex := m.state.SelectedRepoIndex
@@ -758,8 +774,6 @@ func (m Model) View() string {
 			dialog = m.confirmDeleteDialog.View()
 		case DialogConfirmDeleteRepo:
 			dialog = m.confirmDeleteRepoDialog.View()
-		case DialogEditScript:
-			dialog = m.editScriptDialog.View()
 		}
 
 		// Add error message if present
@@ -799,7 +813,8 @@ func (m Model) renderReposPanel(width, height int) string {
 	} else {
 		for i, repo := range m.state.Config.Repositories {
 			scriptIndicator := ""
-			if repo.PostCreateScript != "" {
+			hasScript, err := config.HasRepoScript(repo.Name)
+			if err == nil && hasScript {
 				scriptIndicator = " 📜"
 			}
 			itemText := fmt.Sprintf("%s (%s)%s", repo.Name, repo.Type, scriptIndicator)
@@ -864,40 +879,35 @@ func (m Model) renderWorktreesPanel(width, height int) string {
 			Bold(true).
 			Render("\nNotes:")
 
-		// Check if we're editing this worktree's notes
-		if m.editingNotes && m.editingWorktreePath == selectedWT.Path {
-			// Show the textarea for inline editing
-			textareaView := m.notesTextarea.View()
-			helpText := lipgloss.NewStyle().
+		// Show the notes in read-only mode
+		notes := ""
+		if selectedRepo != nil {
+			storedNotes, err := config.GetWorktreeNotes(selectedRepo.Name, selectedWT.Name)
+			if err == nil {
+				notes = storedNotes
+			}
+		}
+
+		if notes != "" {
+			// Truncate notes if too long
+			maxNoteLength := 200
+			displayNotes := notes
+			if len(notes) > maxNoteLength {
+				displayNotes = notes[:maxNoteLength] + "..."
+			}
+			// Replace newlines with spaces for compact display
+			displayNotes = strings.ReplaceAll(displayNotes, "\n", " ")
+			notesContent := lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#4B5563", Dark: "#D1D5DB"}).
+				Italic(true).
+				Render("  " + displayNotes)
+			notesSection = notesHeader + "\n" + notesContent
+		} else {
+			emptyNotes := lipgloss.NewStyle().
 				Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"}).
 				Italic(true).
-				Render("ESC or Ctrl+S to save and exit")
-			notesSection = notesHeader + "\n" + textareaView + "\n" + helpText
-		} else {
-			// Show the notes in read-only mode
-			notes := m.state.Config.GetWorktreeNotes(selectedWT.Path)
-
-			if notes != "" {
-				// Truncate notes if too long
-				maxNoteLength := 200
-				displayNotes := notes
-				if len(notes) > maxNoteLength {
-					displayNotes = notes[:maxNoteLength] + "..."
-				}
-				// Replace newlines with spaces for compact display
-				displayNotes = strings.ReplaceAll(displayNotes, "\n", " ")
-				notesContent := lipgloss.NewStyle().
-					Foreground(lipgloss.AdaptiveColor{Light: "#4B5563", Dark: "#D1D5DB"}).
-					Italic(true).
-					Render("  " + displayNotes)
-				notesSection = notesHeader + "\n" + notesContent
-			} else {
-				emptyNotes := lipgloss.NewStyle().
-					Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"}).
-					Italic(true).
-					Render("  (no notes - press 'n' to add)")
-				notesSection = notesHeader + "\n" + emptyNotes
-			}
+				Render("  (no notes - press 'n' to add)")
+			notesSection = notesHeader + "\n" + emptyNotes
 		}
 	}
 
