@@ -312,11 +312,14 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) openEditor(target editTarget, repoName, worktreeName, content string) (tea.Model, tea.Cmd) {
-	prefix := "workman-edit-"
-	if target == editNotesTarget {
+	var prefix string
+	switch target {
+	case editNotesTarget:
 		prefix = "workman-notes-"
-	} else if target == editScriptTarget {
+	case editScriptTarget:
 		prefix = "workman-script-"
+	default:
+		prefix = "workman-edit-"
 	}
 
 	tmpFile, err := os.CreateTemp("", prefix)
@@ -597,11 +600,8 @@ func (m Model) deleteRepository() (tea.Model, tea.Cmd) {
 				continue
 			}
 
-			// Delete branch
-			if err := git.DeleteBranch(repo.Path, wt.Branch); err != nil {
-				// Don't treat branch deletion failure as critical since worktree is removed
-				// Just log it but continue
-			}
+			// Delete branch - failure is non-critical since worktree is already removed
+			_ = git.DeleteBranch(repo.Path, wt.Branch)
 		}
 	}
 
