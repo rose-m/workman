@@ -86,6 +86,76 @@ You can also add repositories directly through the UI by pressing `+` when in th
 - URLs starting with `http://`, `https://`, `git@`, or `ssh://` are detected as **remote**
 - All other paths are detected as **local**
 
+## Terminal Integration
+
+Workman can execute a custom script file when you press `Enter` on a worktree. This allows you to open terminals, create splits, or run any command with the worktree path.
+
+Configure the script file path in your `~/.config/workman/config.toml`:
+
+```toml
+enter_script = "~/.config/workman/enter-worktree.sh"
+```
+
+### Creating Your Script File
+
+Create a shell script file (e.g., `~/.config/workman/enter-worktree.sh`) with your desired behavior:
+
+**Ghostty (macOS) - Create split using Command+D keybinding:**
+```bash
+#!/bin/bash
+# ~/.config/workman/enter-worktree.sh
+osascript -e 'tell application "System Events" to keystroke "d" using command down'
+sleep 0.2
+osascript -e 'tell application "System Events" to keystroke "cd ${worktree_path}" & return'
+```
+
+**tmux - Open split:**
+```bash
+#!/bin/bash
+tmux split-window -h -c '${worktree_path}'
+```
+
+**Ghostty (macOS) - Open new window:**
+```bash
+#!/bin/bash
+open -na ghostty --args --working-directory='${worktree_path}'
+```
+
+**Ghostty (macOS) - Create split and start Claude Code:**
+```bash
+#!/bin/bash
+osascript -e 'tell application "System Events" to keystroke "d" using command down'
+sleep 0.2
+osascript -e 'tell application "System Events" to keystroke "cd ${worktree_path} && claude" & return'
+```
+
+**tmux split and start Claude Code:**
+```bash
+#!/bin/bash
+tmux split-window -h -c '${worktree_path}' claude
+```
+
+Don't forget to make your script executable:
+```bash
+chmod +x ~/.config/workman/enter-worktree.sh
+```
+
+### Available Variables
+
+The following variables will be substituted in your script:
+
+- `${worktree_path}` or `${path}` - Full path to the worktree
+- `${branch_name}` or `${branch}` - Git branch name
+- `${repo_name}` or `${repo}` - Repository name
+
+### Tips
+
+- Leave `enter_script` empty to disable the keybinding
+- Scripts are executed with `sh -c`, so they must be shell-compatible
+- Use `~` in the path to reference your home directory
+- Add `&` at the end of commands to run them in the background (non-blocking)
+- Use `exec $SHELL` at the end to keep terminal open after command finishes
+
 ## Keyboard Shortcuts
 
 ### Main View
@@ -93,7 +163,10 @@ You can also add repositories directly through the UI by pressing `+` when in th
 - `Tab` or `h/l` - Switch between repositories and worktrees panes (h=left, l=right)
 - `+` - Add repository (when in repos pane) or add worktree (when in worktrees pane)
 - `-` - Delete worktree (when in worktrees pane, with confirmation)
+- `n` - Edit notes for selected worktree
+- `s` - Edit post-create script for selected repository
 - `y` - Yank (copy) command to clipboard (when worktree is selected)
+- `Enter` - Execute configured script for worktree (see Terminal Integration below)
 - `q` or `Ctrl+C` - Quit
 
 ### Add Repository Dialog
@@ -165,6 +238,6 @@ This is a working TUI with:
 3. Display more repository details (current branch, status)
 4. Display more worktree details (commit hash, ahead/behind status)
 5. Add status indicators (clean, dirty, ahead/behind)
-6. Add ability to open worktree in editor/terminal
+6. ~~Add ability to open worktree in editor/terminal~~ ✅ (implemented via configurable scripts)
 7. Add Git stash management
 8. Add search/filter for repositories and worktrees
