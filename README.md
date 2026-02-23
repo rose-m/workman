@@ -161,6 +161,7 @@ The following variables will be substituted in your script:
 ### Main View
 - `↑/↓` or `j/k` - Navigate items in the active pane
 - `Tab` or `h/l` - Switch between repositories and worktrees panes (h=left, l=right)
+- `r` - Refresh worktree state for the selected repository
 - `+` - Add repository (when in repos pane) or add worktree (when in worktrees pane)
 - `-` - Delete worktree (when in worktrees pane, with confirmation)
 - `n` - Edit notes for selected worktree

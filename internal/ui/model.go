@@ -165,6 +165,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "r":
+			selectedWorktreeName := ""
+			if len(m.state.Worktrees) > 0 && m.state.SelectedWTIndex < len(m.state.Worktrees) {
+				selectedWorktreeName = m.state.Worktrees[m.state.SelectedWTIndex].Name
+			}
+
+			m = m.loadWorktrees()
+
+			if selectedWorktreeName != "" {
+				for i, wt := range m.state.Worktrees {
+					if wt.Name == selectedWorktreeName {
+						m.state.SelectedWTIndex = i
+						break
+					}
+				}
+			}
+
+			m.errorMsg = ""
+			return m, showSuccess("Refreshed")
+
 		case "n":
 			if m.state.ActivePane == state.WorktreesPane {
 				if len(m.state.Worktrees) > 0 && m.state.GetSelectedRepo() != nil {
@@ -983,7 +1003,7 @@ func (m Model) executeScript(scriptPath string) error {
 
 func (m Model) renderHelp() string {
 	help := []string{
-		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Add: +   Delete: -   Notes: n   Script: s   Yank: y   Open: Enter   Quit: q or ctrl+c",
+		"Navigation: ↑↓ or j/k   Switch pane: tab or h/l   Refresh: r   Add: +   Delete: -   Notes: n   Script: s   Yank: y   Open: Enter   Quit: q or ctrl+c",
 	}
 	return helpStyle.Render(strings.Join(help, " • "))
 }

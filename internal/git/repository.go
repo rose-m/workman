@@ -183,6 +183,10 @@ func RemoveWorktree(repoPath, worktreePath string) error {
 
 // DeleteBranch deletes a branch forcefully (even if unmerged)
 func DeleteBranch(repoPath, branch string) error {
+	if branch == "" || strings.Contains(branch, "HEAD") {
+		return nil
+	}
+
 	// Use -D (force delete) to remove even if unmerged
 	cmd := exec.Command("git", "branch", "-D", branch)
 	cmd.Dir = repoPath
