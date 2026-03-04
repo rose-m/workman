@@ -107,7 +107,7 @@ func BranchExists(repoPath, branch string) (bool, error) {
 }
 
 // AddWorktree creates a new worktree for the repository in the root directory
-// If the branch doesn't exist, it creates it based on main/master (remote) or current branch (local)
+// If the branch doesn't exist, it creates it from origin's default branch when available
 // Worktree will be created at: <rootDir>/<sanitizedRepoName>-<sanitizedBranchName>
 func AddWorktree(repoPath, rootDir, repoName, branch string, isRemote bool) error {
 	// Check if branch exists
@@ -135,27 +135,63 @@ func AddWorktree(repoPath, rootDir, repoName, branch string, isRemote bool) erro
 		cmd = exec.Command("git", "worktree", "add", worktreePath, branch)
 	} else {
 		// Branch doesn't exist, create it
-		if isRemote {
-			// For remote repos, try to base on origin/main or origin/master
-			baseBranch := "origin/main"
-			if !remoteBranchExists(repoPath, "origin/main") {
-				baseBranch = "origin/master"
-			}
-			cmd = exec.Command("git", "worktree", "add", "-b", branch, worktreePath, baseBranch)
-		} else {
-			// For local repos, base on current branch
-			currentBranch, err := GetCurrentBranch(repoPath)
-			if err != nil {
-				return fmt.Errorf("failed to get current branch: %w", err)
-			}
-			cmd = exec.Command("git", "worktree", "add", "-b", branch, worktreePath, currentBranch)
+		baseBranch, err := getBaseBranchForWorktree(repoPath, isRemote)
+		if err != nil {
+			return fmt.Errorf("failed to determine base branch: %w", err)
 		}
+		cmd = exec.Command("git", "worktree", "add", "-b", branch, worktreePath, baseBranch)
 	}
 
 	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to add worktree: %w\nOutput: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// getBaseBranchForWorktree returns the best base branch for creating a new worktree branch.
+// It prefers origin's default branch after fetching, then falls back to origin/main or origin/master.
+// For local repositories without a usable origin branch, it falls back to the current local branch.
+func getBaseBranchForWorktree(repoPath string, isRemote bool) (string, error) {
+	if err := fetchOrigin(repoPath); err == nil {
+		cmd := exec.Command("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+		cmd.Dir = repoPath
+		output, err := cmd.Output()
+		if err == nil {
+			baseBranch := strings.TrimSpace(string(output))
+			if baseBranch != "" {
+				return baseBranch, nil
+			}
+		}
+
+		if remoteBranchExists(repoPath, "origin/main") {
+			return "origin/main", nil
+		}
+		if remoteBranchExists(repoPath, "origin/master") {
+			return "origin/master", nil
+		}
+	}
+
+	if isRemote {
+		return "", fmt.Errorf("could not determine origin default branch")
+	}
+
+	currentBranch, err := GetCurrentBranch(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	return currentBranch, nil
+}
+
+func fetchOrigin(repoPath string) error {
+	cmd := exec.Command("git", "fetch", "origin")
+	cmd.Dir = repoPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to fetch origin: %w\nOutput: %s", err, string(output))
 	}
 
 	return nil

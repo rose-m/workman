@@ -26,6 +26,7 @@ type Model struct {
 	confirmDeleteRepoDialog ConfirmDeleteRepositoryDialog
 	errorMsg                string
 	successMsg              string
+	worktreeCreateRunning   bool
 }
 
 type editTarget int
@@ -41,6 +42,13 @@ type editorFinishedMsg struct {
 	repoName     string
 	worktreeName string
 	tempPath     string
+}
+
+type worktreeCreateFinishedMsg struct {
+	branch    string
+	worktrees []state.Worktree
+	err       error
+	scriptErr error
 }
 
 func NewModel(appState *state.AppState) Model {
@@ -115,6 +123,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, nil
+
+	case worktreeCreateFinishedMsg:
+		m.worktreeCreateRunning = false
+		m.addWorktreeDialog.statusMessage = ""
+
+		if msg.err != nil {
+			return m, showError(fmt.Sprintf("Failed to create worktree: %v", msg.err))
+		}
+
+		m.state.Worktrees = msg.worktrees
+		for i, wt := range msg.worktrees {
+			if wt.Branch == msg.branch {
+				m.state.SelectedWTIndex = i
+				break
+			}
+		}
+
+		if msg.scriptErr != nil {
+			m.dialogType = DialogNone
+			m.errorMsg = ""
+			return m, showError(fmt.Sprintf("Worktree created but script failed: %v", msg.scriptErr))
+		}
+
+		m.dialogType = DialogNone
+		m.errorMsg = ""
+		return m, showSuccess("Worktree created successfully")
 
 	case tea.KeyMsg:
 		// Handle dialog mode
@@ -286,6 +320,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.dialogType == DialogAddWorktree && m.worktreeCreateRunning && msg.String() != "ctrl+c" {
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -324,6 +362,9 @@ func (m Model) handleDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case DialogAddRepo:
 			return m.saveRepository()
 		case DialogAddWorktree:
+			if m.worktreeCreateRunning {
+				return m, nil
+			}
 			return m.saveWorktree()
 		}
 		return m, nil
@@ -508,56 +549,51 @@ func (m Model) saveWorktree() (tea.Model, tea.Cmd) {
 	branch := m.addWorktreeDialog.GetBranchName()
 
 	// Create worktree in configured root directory
-	isRemote := repo.Type == "remote"
 	rootDir := m.state.Config.RootDirectory
-	if err := git.AddWorktree(repo.Path, rootDir, repo.Name, branch, isRemote); err != nil {
-		return m, showError(fmt.Sprintf("Failed to create worktree: %v", err))
-	}
 
-	// Reload worktrees to get the new worktree path
-	worktrees, err := git.ListWorktrees(repo.Path)
-	if err != nil {
-		return m, showError(fmt.Sprintf("Failed to list worktrees: %v", err))
-	}
-	m.state.Worktrees = worktrees
-
-	// Select the newly created worktree
-	for i, wt := range worktrees {
-		if wt.Branch == branch {
-			m.state.SelectedWTIndex = i
-			break
-		}
-	}
-
-	// Execute post-create script if configured
-	script, err := config.GetRepoScript(repo.Name)
-	if err != nil {
-		return m, showError(fmt.Sprintf("Failed to load post-create script: %v", err))
-	}
-	if script != "" {
-		// Find the newly created worktree
-		var newWorktreePath string
-		for _, wt := range worktrees {
-			if wt.Branch == branch {
-				newWorktreePath = wt.Path
-				break
-			}
-		}
-
-		if newWorktreePath != "" {
-			if err := git.ExecutePostCreateScript(script, repo.Path, newWorktreePath); err != nil {
-				m.dialogType = DialogNone
-				m.errorMsg = ""
-				return m, showError(fmt.Sprintf("Worktree created but script failed: %v", err))
-			}
-		}
-	}
-
-	// Close dialog
-	m.dialogType = DialogNone
+	m.worktreeCreateRunning = true
+	m.addWorktreeDialog.statusMessage = "fetching origin, creating branch, and running post-create script..."
 	m.errorMsg = ""
+	m.successMsg = ""
 
-	return m, showSuccess("Worktree created successfully")
+	return m, runCreateWorktree(repo.Name, repo.Path, repo.Type, rootDir, branch)
+}
+
+func runCreateWorktree(repoName, repoPath, repoType, rootDir, branch string) tea.Cmd {
+	return func() tea.Msg {
+		isRemote := repoType == "remote"
+		if err := git.AddWorktree(repoPath, rootDir, repoName, branch, isRemote); err != nil {
+			return worktreeCreateFinishedMsg{branch: branch, err: err}
+		}
+
+		worktrees, err := git.ListWorktrees(repoPath)
+		if err != nil {
+			return worktreeCreateFinishedMsg{branch: branch, err: fmt.Errorf("failed to list worktrees: %w", err)}
+		}
+
+		script, err := config.GetRepoScript(repoName)
+		if err != nil {
+			return worktreeCreateFinishedMsg{branch: branch, err: fmt.Errorf("failed to load post-create script: %w", err)}
+		}
+
+		if script != "" {
+			var newWorktreePath string
+			for _, wt := range worktrees {
+				if wt.Branch == branch {
+					newWorktreePath = wt.Path
+					break
+				}
+			}
+
+			if newWorktreePath != "" {
+				if err := git.ExecutePostCreateScript(script, repoPath, newWorktreePath); err != nil {
+					return worktreeCreateFinishedMsg{branch: branch, worktrees: worktrees, scriptErr: err}
+				}
+			}
+		}
+
+		return worktreeCreateFinishedMsg{branch: branch, worktrees: worktrees}
+	}
 }
 
 func (m Model) deleteWorktree() (tea.Model, tea.Cmd) {

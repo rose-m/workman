@@ -184,6 +184,7 @@ type AddWorktreeDialog struct {
 	branches           []string
 	suggestions        []string
 	selectedSuggestion int
+	statusMessage      string
 }
 
 func NewAddWorktreeDialog(branches []string) AddWorktreeDialog {
@@ -199,6 +200,7 @@ func NewAddWorktreeDialog(branches []string) AddWorktreeDialog {
 		branches:           branches,
 		suggestions:        []string{},
 		selectedSuggestion: 0,
+		statusMessage:      "",
 	}
 }
 
@@ -316,6 +318,14 @@ func (d *AddWorktreeDialog) View() string {
 
 	b.WriteString("\n\n")
 
+	if d.statusMessage != "" {
+		statusStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#1D4ED8", Dark: "#60A5FA"}).
+			Bold(true)
+		b.WriteString(statusStyle.Render("Working: " + d.statusMessage))
+		b.WriteString("\n\n")
+	}
+
 	b.WriteString(helpStyle.Render("Ctrl+S: create  •  Esc: cancel"))
 
 	dialogStyle := lipgloss.NewStyle().
@@ -349,6 +359,7 @@ func (d *AddWorktreeDialog) IsValid() (bool, string) {
 func (d *AddWorktreeDialog) Reset() {
 	d.input.SetValue("")
 	d.input.Focus()
+	d.statusMessage = ""
 }
 
 // ConfirmDeleteDialog handles the confirmation for deleting a worktree
