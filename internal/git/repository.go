@@ -130,6 +130,7 @@ func AddWorktree(repoPath, rootDir, repoName, branch string, isRemote bool) erro
 	}
 
 	var cmd *exec.Cmd
+	createdNewBranch := false
 	if exists {
 		// Branch exists, just create worktree
 		cmd = exec.Command("git", "worktree", "add", worktreePath, branch)
@@ -140,12 +141,33 @@ func AddWorktree(repoPath, rootDir, repoName, branch string, isRemote bool) erro
 			return fmt.Errorf("failed to determine base branch: %w", err)
 		}
 		cmd = exec.Command("git", "worktree", "add", "-b", branch, worktreePath, baseBranch)
+		createdNewBranch = true
 	}
 
 	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to add worktree: %w\nOutput: %s", err, string(output))
+	}
+
+	if createdNewBranch {
+		if err := unsetBranchUpstream(repoPath, branch); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func unsetBranchUpstream(repoPath, branch string) error {
+	cmd := exec.Command("git", "branch", "--unset-upstream", branch)
+	cmd.Dir = repoPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "No upstream configured") {
+			return nil
+		}
+		return fmt.Errorf("failed to unset upstream for branch %q: %w\nOutput: %s", branch, err, string(output))
 	}
 
 	return nil
