@@ -16,6 +16,10 @@ yank_template = "${worktree_path}"
 # Example: enter_script = "~/.config/workman/enter-worktree.sh"
 enter_script = ""
 
+# Layout direction for the main view: 0 = horizontal (side by side), 1 = vertical (stacked)
+# Default: 0 (horizontal)
+layout_direction = 0
+
 # List of repositories
 [[repositories]]
 name = "example-local"

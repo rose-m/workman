@@ -16,11 +16,19 @@ type Repository struct {
 	PostCreateScript string `mapstructure:"post_create_script"` // Script to run after creating worktrees
 }
 
+type LayoutDirection int
+
+const (
+	LayoutHorizontal LayoutDirection = iota // 0 - default
+	LayoutVertical                          // 1
+)
+
 type Config struct {
-	RootDirectory string       `mapstructure:"root_directory"`
-	Repositories  []Repository `mapstructure:"repositories"`
-	YankTemplate  string       `mapstructure:"yank_template"`
-	EnterScript   string       `mapstructure:"enter_script"` // Path to script file to execute on Enter
+	RootDirectory   string          `mapstructure:"root_directory"`
+	Repositories    []Repository    `mapstructure:"repositories"`
+	YankTemplate    string          `mapstructure:"yank_template"`
+	EnterScript     string          `mapstructure:"enter_script"`     // Path to script file to execute on Enter
+	LayoutDirection LayoutDirection `mapstructure:"layout_direction"` // 0 = horizontal, 1 = vertical
 }
 
 func DefaultConfig() *Config {
@@ -28,8 +36,9 @@ func DefaultConfig() *Config {
 	return &Config{
 		RootDirectory: filepath.Join(homeDir, "workspace"),
 		Repositories:  []Repository{},
-		YankTemplate:  "${worktree_path}",
-		EnterScript:   "",
+		YankTemplate:    "${worktree_path}",
+		EnterScript:     "",
+		LayoutDirection: LayoutHorizontal,
 	}
 }
 
@@ -56,6 +65,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("repositories", defaultCfg.Repositories)
 	viper.SetDefault("yank_template", defaultCfg.YankTemplate)
 	viper.SetDefault("enter_script", defaultCfg.EnterScript)
+	viper.SetDefault("layout_direction", defaultCfg.LayoutDirection)
 
 	// If config file doesn't exist, create it with defaults
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
@@ -94,6 +104,7 @@ func Save(cfg *Config) error {
 	viper.Set("repositories", repositoriesToMaps(cfg.Repositories))
 	viper.Set("yank_template", cfg.YankTemplate)
 	viper.Set("enter_script", cfg.EnterScript)
+	viper.Set("layout_direction", cfg.LayoutDirection)
 	return viper.WriteConfig()
 }
 

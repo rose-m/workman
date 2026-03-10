@@ -791,19 +791,22 @@ func (m Model) View() string {
 		return "Terminal too small. Please resize."
 	}
 
-	// Calculate panel dimensions (split view: 40% left, 60% right)
-	leftWidth := m.width*40/100 - 4
-	rightWidth := m.width*60/100 - 4
-	panelHeight := m.height - 6
-
-	// Render left panel (repositories)
-	leftPanel := m.renderReposPanel(leftWidth, panelHeight)
-
-	// Render right panel (worktrees)
-	rightPanel := m.renderWorktreesPanel(rightWidth, panelHeight)
-
-	// Combine panels side by side
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	var panels string
+	if m.state.Config.LayoutDirection == config.LayoutVertical {
+		panelWidth := m.width - 4
+		topHeight := (m.height - 6) * 40 / 100
+		bottomHeight := (m.height - 6) * 60 / 100
+		leftPanel := m.renderReposPanel(panelWidth, topHeight)
+		rightPanel := m.renderWorktreesPanel(panelWidth, bottomHeight)
+		panels = lipgloss.JoinVertical(lipgloss.Left, leftPanel, rightPanel)
+	} else {
+		leftWidth := m.width*40/100 - 4
+		rightWidth := m.width*60/100 - 4
+		panelHeight := m.height - 6
+		leftPanel := m.renderReposPanel(leftWidth, panelHeight)
+		rightPanel := m.renderWorktreesPanel(rightWidth, panelHeight)
+		panels = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	}
 
 	// Render help text
 	help := m.renderHelp()
